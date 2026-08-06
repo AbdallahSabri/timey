@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.github
+.husky
+.vscode
+coverage
+supabase
+*.md
+.env
+.env.*
+!.env.example
+Dockerfile
+.dockerignore
