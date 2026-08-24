@@ -1,8 +1,6 @@
 /**
- * Hand-authored placeholder matching `supabase/migrations/0001_create_todos.sql`.
- *
- * Once you have a real Supabase project linked, regenerate this file against
- * it and delete this comment block:
+ * Placeholder — no tables yet. Once you have a real Supabase project linked
+ * and have run your first migration, regenerate this file against it:
  *
  *   pnpm dlx supabase gen types typescript --project-id <project-id> \
  *     > src/types/supabase.ts
@@ -19,29 +17,7 @@ export type Json =
 
 export interface Database {
   public: {
-    Tables: {
-      todos: {
-        Row: {
-          id: string;
-          title: string;
-          is_complete: boolean;
-          inserted_at: string;
-        };
-        Insert: {
-          id?: string;
-          title: string;
-          is_complete?: boolean;
-          inserted_at?: string;
-        };
-        Update: {
-          id?: string;
-          title?: string;
-          is_complete?: boolean;
-          inserted_at?: string;
-        };
-        Relationships: [];
-      };
-    };
+    Tables: Record<string, never>;
     Views: Record<string, never>;
     Functions: Record<string, never>;
     Enums: Record<string, never>;

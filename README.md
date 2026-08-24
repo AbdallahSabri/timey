@@ -14,7 +14,7 @@ cp .env.example .env.local   # fill in your Supabase project (see below)
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The app runs even without Supabase configured — `/` and `/api/health` work regardless; `/todos` (the demo CRUD flow) needs real credentials.
+Open [http://localhost:3000](http://localhost:3000). The app runs even without Supabase configured — `/` and `/api/health` work regardless.
 
 ## Environment variables
 
@@ -31,34 +31,20 @@ Get these from your Supabase project's **Settings → API**. Copy `.env.example`
 1. `git clone` (or use this repo as a GitHub template), then `rm -rf .git && git init`.
 2. Update `package.json`'s `name` field.
 3. Create a new Supabase project and set env vars — see "Swap the Supabase project" below.
-4. Run the migration in `supabase/migrations/0001_create_todos.sql` against your new project (or delete it if you're stripping the demo — see below).
+4. Add your first migration under `supabase/migrations/` and run it against your new project.
 5. Update `README.md`/`CLAUDE.md` titles and this fork checklist for your project.
 6. `pnpm install && pnpm dev` to confirm it boots clean, then `pnpm lint && pnpm typecheck && pnpm test && pnpm build` before your first commit.
 
 ## Swap the Supabase project
 
 1. Create a project at [supabase.com](https://supabase.com) (or point at a self-hosted instance).
-2. Run the SQL in `supabase/migrations/0001_create_todos.sql` via the SQL editor, or `supabase db push` if you're using the Supabase CLI locally.
+2. Add a migration under `supabase/migrations/` for your first table, then run it via the SQL editor or `supabase db push` if you're using the Supabase CLI locally.
 3. Copy the Project URL and anon key from **Settings → API** into `.env.local` (local dev) and into your host's env var config (production — see "Deploy on Coolify").
 4. Regenerate typed models against the real schema:
    ```bash
    pnpm dlx supabase gen types typescript --project-id <project-id> > src/types/supabase.ts
    ```
-   This overwrites the hand-authored placeholder in `src/types/supabase.ts` — safe to do any time your schema changes.
-
-## Strip the demo CRUD
-
-The `/todos` route exists to prove the `build-ui` ↔ `implement-logic` handoff and that the Supabase wiring works end-to-end. Once you've confirmed your project connects, remove it:
-
-```bash
-rm -rf src/app/todos
-rm -rf src/components/todos
-rm src/lib/actions/todos.ts
-rm src/lib/validations/todo.ts
-rm supabase/migrations/0001_create_todos.sql
-```
-
-Then remove the `/todos` link from `src/app/page.tsx` and drop the `Todo`-specific test files (`*.test.ts(x)` under the paths above — already covered by the `rm -rf` calls). The `components/ui/**` primitives, Supabase clients, and middleware are all generic — keep those.
+   This overwrites the empty placeholder in `src/types/supabase.ts` — safe to do any time your schema changes.
 
 ## Project structure
 
@@ -66,10 +52,8 @@ Then remove the `/todos` link from `src/app/page.tsx` and drop the `Todo`-specif
 src/
   app/              routes (App Router)
     api/health/     container health check
-    todos/          demo CRUD page
   components/
     ui/             shadcn primitives — presentational only, CLI-managed
-    todos/          feature components (build-ui owns this pattern)
   lib/
     supabase/       browser/server Supabase clients + middleware session refresh
     actions/        server actions (implement-logic owns this pattern)

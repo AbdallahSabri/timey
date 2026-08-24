@@ -1,22 +1,26 @@
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
-
 export const dynamic = "force-dynamic";
 
 async function checkSupabase(): Promise<"connected" | "unreachable"> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) return "unreachable";
+
   try {
-    const supabase = await createClient();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
 
-    const { error } = await supabase
-      .from("todos")
-      .select("id", { head: true, count: "exact" })
-      .abortSignal(controller.signal);
+    // Supabase's built-in GoTrue health endpoint — schema-agnostic, so it
+    // works before any tables exist.
+    const response = await fetch(`${url}/auth/v1/health`, {
+      headers: { apikey: anonKey },
+      signal: controller.signal,
+    });
 
     clearTimeout(timeout);
-    return error ? "unreachable" : "connected";
+    return response.ok ? "connected" : "unreachable";
   } catch {
     return "unreachable";
   }

@@ -1,6 +1,3 @@
-import Link from "next/link";
-
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -19,16 +16,11 @@ export default function Home() {
             Next.js 15 + Tailwind + shadcn/ui + Supabase, ready to fork.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent>
           <p className="text-muted-foreground text-sm">
-            The <code>/todos</code> route is a demo CRUD flow wired up to
-            Supabase — remove it once you&apos;ve confirmed your project
-            connects, or keep it as a reference. See README.md for the fork
-            checklist.
+            See README.md for the fork checklist and how to wire up your first
+            Supabase table.
           </p>
-          <Button asChild className="w-fit">
-            <Link href="/todos">View demo CRUD</Link>
-          </Button>
         </CardContent>
       </Card>
     </main>
