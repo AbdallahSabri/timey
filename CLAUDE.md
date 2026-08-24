@@ -40,6 +40,7 @@ Subagents in `.claude/agents/` are scoped by verb, not role. Route work by file 
 
 | Path | Owner | Notes |
 | --- | --- | --- |
+| `supabase/migrations/**` | `write-migrations` | SQL, RLS policies, `SECURITY DEFINER` functions. Never written in the same pass as the code that queries through them (`SPEC.md` §0.2) |
 | `src/components/[feature]/**` | `build-ui` | Composes `components/ui`, owns Tailwind/layout/responsiveness |
 | `src/app/**/*.tsx` (layout/JSX/styling) | `build-ui` | Data fetching in Server Components should call `lib/actions/**`, not query Supabase inline |
 | `src/components/ui/**` | shadcn CLI | Not hand-owned by either agent — regenerate via CLI |
@@ -51,7 +52,9 @@ Subagents in `.claude/agents/` are scoped by verb, not role. Route work by file 
 | Anything, read-only | `code-reviewer` | Run after each milestone, before commit. Never edits. |
 | Anything, gate enforcement | `test-runner` | Proactively after any code change. Fixes root causes, never weakens tests. |
 
-When a task spans both UI and logic (e.g. "add a demo CRUD flow"), split it: `implement-logic` writes the schema/action/route first, `build-ui` wires the component to it second.
+When a task spans several layers, split it and keep the order **migrations → types → actions → UI**: `write-migrations` lands the schema and policies, types are regenerated, `implement-logic` writes the action against them, `build-ui` wires the component last.
+
+`SPEC.md` is the behavioral contract and `PLAN.md` holds the phase ordering. A conflict with either amends that document — it is not coded around.
 
 ## Local dev
 

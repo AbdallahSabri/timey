@@ -10,11 +10,25 @@ See `CLAUDE.md` for stack rules, the lint/build gate, and the `.claude/agents/` 
 
 ```bash
 pnpm install
+pnpm exec supabase start     # local Postgres + Auth (needs Docker running)
 cp .env.example .env.local   # fill in your Supabase project (see below)
 pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). The app runs even without Supabase configured — `/` and `/api/health` work regardless.
+
+### Local Supabase ports
+
+This project runs on the **545xx** range rather than the Supabase default 543xx, so it can run alongside another local Supabase project without port collisions. `supabase start` prints the URLs; the ones you'll want:
+
+| Service | URL |
+| --- | --- |
+| API | `http://127.0.0.1:54521` |
+| Database | `postgresql://postgres:postgres@127.0.0.1:54522/postgres` |
+| Studio | `http://127.0.0.1:54523` |
+| Inbucket (test email) | `http://127.0.0.1:54524` |
+
+Set `NEXT_PUBLIC_SUPABASE_URL` to the API URL and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to the anon key `supabase start` prints.
 
 ## Environment variables
 
@@ -22,9 +36,10 @@ Open [http://localhost:3000](http://localhost:3000). The app runs even without S
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server Supabase clients | Yes — inlined at **build time** |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + server Supabase clients | Yes — inlined at **build time** |
-| `SUPABASE_SERVICE_ROLE_KEY` | Only if a server action needs to bypass RLS | No — server-only, runtime |
 
 Get these from your Supabase project's **Settings → API**. Copy `.env.example` to `.env.local` for local dev.
+
+**There is no service-role key in this project, by design.** Anything needing elevated privilege is a `SECURITY DEFINER` Postgres function with a narrow signature, never a key handed to application code — see `SPEC.md` §4.4.
 
 ## Fork this as a new project
 
@@ -83,7 +98,7 @@ This repo ships a multi-stage `Dockerfile` (`deps` → `builder` → `runner`) p
 
 1. **Connect the repo** in Coolify as a new Docker-based application, pointing at this repository/branch.
 2. **Set build-time env vars** — Coolify needs to pass `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` as **Docker build args**, since Next.js inlines `NEXT_PUBLIC_*` vars into the client bundle at build time. In Coolify's build settings, add them as build arguments (not just runtime env vars) — see the `ARG`/`ENV` pairs in the `builder` stage of the `Dockerfile`.
-3. **Set runtime env vars** — anything server-only (e.g. `SUPABASE_SERVICE_ROLE_KEY`) goes in Coolify's regular environment variable config. These are injected at container start, never baked into the image.
+3. **Set runtime env vars** — anything server-only goes in Coolify's regular environment variable config, injected at container start and never baked into the image. The app currently needs none: the two `NEXT_PUBLIC_*` vars above are build-time, and there is no service-role key (`SPEC.md` §4.4).
 4. **Expose port 3000** — the container listens on `3000` (`EXPOSE 3000`, `PORT=3000` in the `Dockerfile`).
 5. **Health check** — point Coolify's health check at `/api/health`. It always returns `200` with a JSON body (`{ status: "ok", supabase: "connected" | "unreachable", timestamp }`) so a transient Supabase outage doesn't flap the container's liveness state.
 6. **Auto-deploy on push** — enable Coolify's webhook/auto-deploy for your branch so pushes trigger a rebuild.

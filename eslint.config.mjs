@@ -66,6 +66,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Supabase CLI tree is SQL, TOML, and Deno — none of it belongs to
+    // this project's Next/TypeScript toolchain, and `.temp/` is generated
+    // scratch space regenerated on every `supabase start`.
+    "supabase/**",
   ]),
 ]);
 

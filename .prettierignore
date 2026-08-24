@@ -4,3 +4,7 @@ pnpm-lock.yaml
 coverage
 public
 *.md
+
+# Supabase CLI tree: SQL migrations, TOML config, and generated Deno scratch
+# space under .temp/ — none of it is Prettier's to format.
+supabase
