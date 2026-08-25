@@ -499,6 +499,59 @@ export type Database = {
     };
     Functions: {
       accept_invitation: { Args: { p_token: string }; Returns: string };
+      admin_create_entry: {
+        Args: {
+          p_ended_at: string;
+          p_note?: string;
+          p_project_id: string;
+          p_started_at: string;
+          p_task_id: string;
+          p_user_id: string;
+        };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "time_entries";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      admin_delete_entry: {
+        Args: { p_entry_id: string };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "time_entries";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
       admin_edit_entry: {
         Args: {
           p_ended_at?: string;
@@ -539,6 +592,65 @@ export type Database = {
           p_request_id: string;
           p_started_at: string;
           p_task_id: string;
+        };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "time_entries";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      apply_entry_create: {
+        Args: {
+          p_changed_by: string;
+          p_ended_at: string;
+          p_note: string;
+          p_project_id: string;
+          p_request_id: string;
+          p_started_at: string;
+          p_task_id: string;
+          p_user_id: string;
+        };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "time_entries";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      apply_entry_delete: {
+        Args: {
+          p_changed_by: string;
+          p_entry_id: string;
+          p_request_id: string;
         };
         Returns: {
           company_id: string;

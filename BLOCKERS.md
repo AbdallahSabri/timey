@@ -24,6 +24,10 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-6 · N-8 closed — single-admin companies can now delete and create directly, 2026-08-25
+
+**`SPEC.md` §7.4, §7.4.1.** `admin_delete_entry` and `admin_create_entry` (migration `0010_admin_direct_entry_paths.sql`) join `admin_edit_entry`, giving a lone admin all three correction kinds without needing a second admin to approve anything. Both share validation with `approve_correction`'s matching branches via two newly-extracted internal helpers (`apply_entry_create`/`apply_entry_delete`) rather than duplicating overlap/future-date/membership logic — after this migration there is exactly one implementation of each operation, called from two places (the direct-admin path and the correction-approval path). `admin_delete_entry` deliberately does not inherit N-10's orphaned-running-entry exception (new scope N-8 never asked for); `admin_create_entry` carries no today-only restriction, matching `approve_correction`'s own `create` kind. Verified end to end against a company asserted to have exactly one admin: queue path reproduced as a dead end first (self-approval refused), then both new direct paths succeeded with correct revision rows.
+
 ### D-5 · N-10 closed — orphaned running timer now closeable, 2026-08-25
 
 **`SPEC.md` §2.3, §5.1, §7.4.1.** `admin_edit_entry` (migration `0009_orphaned_running_entries.sql`) now permits closing a running entry in exactly one case: its owner is currently inactive. An active employee's running timer remains completely untouchable by any admin, exactly as Phase 7 established — the fix adds a live owner-status check to the existing refusal rather than loosening it. The exception permits only `ended_at`/`note`; reattributing `project_id`/`task_id`/`started_at` on a still-running row stays refused even for a deactivated owner's entry — full editing is available immediately after closing, through the ordinary closed-entry path. Verified: the pre-fix repro reproduced the dead end live, then confirmed closed; every path that must still fail (active owner, non-admin, cross-tenant, the deactivated owner themself) does.
@@ -77,14 +81,6 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 **`SPEC.md` §5.4, §7.4.1.** The database fully supports this: `approve_correction` explicitly allows an amend proposing only `proposed_ended_at` against a **running** entry, closing it at the corrected time (verified end to end in Phase 7). But the correction-submission UI only offers its affordance on **closed** entries — my own scoping instruction for the Phase 7 UI pass restricted it that way, before this specific running-entry case was fully worked through. The stale-timer prompt (Phase 5) honestly says a correction "can't be done from here yet" rather than offering a broken link, so nothing is misleading — but §5.4's second option is currently unreachable through the product.
 
 **Default if unanswered:** leave the honest gap as-is. Closing it is additive and small: the stale-timer prompt needs a path to the existing amend-correction form, scoped to propose only `proposedEndedAt` against the running entry — no new backend work, since `approve_correction` already handles this case correctly.
-
-### N-8 · A single-admin company cannot delete or create a backdated entry at all (Phase 7)
-
-**`SPEC.md` §7.4.** The correction queue requires a *different* admin to approve (self-approval is blocked, deliberately — §7.4 [R]). `admin_edit_entry` (the direct-edit path for single-admin companies) only amends an existing entry; it has no delete or create counterpart. Put together: a company with exactly one admin has no path to ever delete an erroneous closed entry or create a backdated one on an employee's behalf — not through the queue (no second admin to approve it) and not directly (the function doesn't cover those two kinds).
-
-This is a real, reachable gap for the most common company size — every company starts with exactly one admin (§8.1 Path A) and many will stay that way. Not blocking Phase 7's own exit criteria (the `amend` path works fully, verified end to end), but it should be closed before real single-admin companies rely on corrections.
-
-**Default if unanswered:** leave the gap open — an affected company's workaround today is temporarily promoting a second admin to approve, then demoting them back (both already-working paths from Phase 1/3). Closing it properly means extending `admin_edit_entry` to a `kind`-aware `admin_apply_entry_change()` covering delete and create, mirroring `approve_correction`'s three branches — an additive migration, not a redesign.
 
 ### N-3 · No email-confirmation callback route (Phase 2)
 
