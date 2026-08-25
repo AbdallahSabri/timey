@@ -72,9 +72,13 @@ function emptyManualEntry(): ManualEntryInput {
  *
  * Refusals are rendered verbatim. The actions layer words them with the
  * specifics only it has ("This overlaps an entry from 09:00–10:30.", the
- * today-only sentence that names corrections without linking to a page that
- * does not exist yet), and nothing here should paraphrase them into something
- * vaguer.
+ * today-only sentence that names corrections), and nothing here should
+ * paraphrase them into something vaguer.
+ *
+ * The helper text now names the control that handles an earlier day, because
+ * Phase 7 built one: `CreateCorrectionDialog`, sitting beside this dialog's own
+ * trigger. Saying "not built yet" once it is would send someone looking for a
+ * workaround past the button that does it.
  */
 export function ManualEntryForm({
   projects,
@@ -183,8 +187,11 @@ export function ManualEntryForm({
             {timezone ?? "your company's timezone"}
           </span>
           , so type the time as it reads on your company&rsquo;s clock. You can
-          only log time for today — earlier days need a correction request,
-          which isn&rsquo;t built yet. Time that hasn&rsquo;t happened yet is
+          only log time for today — for an earlier day, close this and use{" "}
+          <span className="text-foreground font-medium">
+            Request an earlier day
+          </span>
+          , which an admin approves. Time that hasn&rsquo;t happened yet is
           refused, give or take five minutes for a clock that drifts.
         </FieldDescription>
 

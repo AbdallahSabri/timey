@@ -13,12 +13,19 @@ import { SignOutButton } from "@/components/auth/sign-out-button";
  * they answer differently per account rather than being hidden: `listProjects()`
  * returns only assigned projects to an employee (§3.6.1) and clients are
  * company-wide readable (§4.2). Omitting a link would not protect either one.
+ *
+ * `/corrections` is listed for everyone and is genuinely for everyone: an
+ * employee's own requests and their outcomes live there (§7.4), and the review
+ * queue above them renders only for an admin — because `is_admin()` decides who
+ * may approve anything, not because the link was withheld. An employee who
+ * types the URL sees their own list, which is what RLS returns them.
  */
 const NAV_LINKS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/projects", label: "Projects" },
   { href: "/clients", label: "Clients" },
   { href: "/members", label: "Team" },
+  { href: "/corrections", label: "Corrections" },
 ];
 
 export function AppHeader() {

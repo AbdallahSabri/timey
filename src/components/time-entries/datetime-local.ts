@@ -1,3 +1,5 @@
+import { safeTimeZone } from "@/components/time-entries/format-entry";
+
 /**
  * Seeding an `<input type="datetime-local">`, and nothing else.
  *
@@ -34,4 +36,53 @@ export function toDateTimeLocalValue(date: Date): string {
     ].join("-"),
     [pad(date.getHours()), pad(date.getMinutes())].join(":"),
   ].join("T");
+}
+
+/**
+ * A **stored instant** → the `datetime-local` value that shows it in the
+ * company's timezone. The other direction from `toDateTimeLocalValue`, and a
+ * different job: this one seeds a field with a value that already exists.
+ *
+ * Phase 7 needs it and Phase 6 did not. A manual entry starts blank, so the
+ * browser's own clock is a fair guess; a correction starts from an entry the
+ * user is looking at, and the field has to agree with the list row above it.
+ * `new Date(iso)` plus local getters would disagree by the offset between the
+ * browser and `companies.timezone` — the employee would edit an end time that
+ * reads 16:32 in their list and propose 14:32, and the server would read that
+ * proposal as company-local (§6.1) and honour it.
+ *
+ * `en-US` with `h23` and the same zone fallback `formatStartedAt` uses, so a
+ * seeded value and the rendered row are the same clock. Midnight is 00:00, never
+ * 24:00 — `hourCycle: "h23"` rather than `hour12: false`, for the reason
+ * `lib/time/company-time.ts` documents at length.
+ *
+ * Seconds are dropped: `localDateTimeSchema` accepts `YYYY-MM-DDTHH:MM` and pads
+ * them back, and `datetime-local` without a `step` shows minutes only. An entry
+ * stopped at 14:32:47 therefore proposes 14:32:00 unless the user changes it —
+ * visible, editable, and preferable to a control that silently drops a value it
+ * displayed.
+ */
+export function toCompanyDateTimeLocalValue(
+  instant: string,
+  timezone: string | null,
+): string {
+  const parsed = Date.parse(instant);
+  if (Number.isNaN(parsed)) {
+    return "";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: safeTimeZone(timezone),
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(parsed);
+
+  const read = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  return `${read("year").padStart(4, "0")}-${read("month")}-${read("day")}T${read("hour")}:${read("minute")}`;
 }

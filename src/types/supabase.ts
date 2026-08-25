@@ -90,6 +90,85 @@ export type Database = {
         };
         Relationships: [];
       };
+      correction_requests: {
+        Row: {
+          company_id: string;
+          created_at: string;
+          id: string;
+          kind: Database["public"]["Enums"]["correction_kind"];
+          proposed_ended_at: string | null;
+          proposed_note: string | null;
+          proposed_project_id: string | null;
+          proposed_started_at: string | null;
+          proposed_task_id: string | null;
+          reason: string;
+          requested_by: string;
+          review_note: string | null;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
+          status: Database["public"]["Enums"]["correction_status"];
+          time_entry_id: string | null;
+        };
+        Insert: {
+          company_id?: string;
+          created_at?: string;
+          id?: string;
+          kind: Database["public"]["Enums"]["correction_kind"];
+          proposed_ended_at?: string | null;
+          proposed_note?: string | null;
+          proposed_project_id?: string | null;
+          proposed_started_at?: string | null;
+          proposed_task_id?: string | null;
+          reason: string;
+          requested_by?: string;
+          review_note?: string | null;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          status?: Database["public"]["Enums"]["correction_status"];
+          time_entry_id?: string | null;
+        };
+        Update: {
+          company_id?: string;
+          created_at?: string;
+          id?: string;
+          kind?: Database["public"]["Enums"]["correction_kind"];
+          proposed_ended_at?: string | null;
+          proposed_note?: string | null;
+          proposed_project_id?: string | null;
+          proposed_started_at?: string | null;
+          proposed_task_id?: string | null;
+          reason?: string;
+          requested_by?: string;
+          review_note?: string | null;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          status?: Database["public"]["Enums"]["correction_status"];
+          time_entry_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "correction_requests_company_id_fkey";
+            columns: ["company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "correction_requests_requested_by_company_id_fkey";
+            columns: ["requested_by", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id", "company_id"];
+          },
+          {
+            foreignKeyName: "correction_requests_reviewed_by_company_id_fkey";
+            columns: ["reviewed_by", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id", "company_id"];
+          },
+        ];
+      };
       invitations: {
         Row: {
           accepted_at: string | null;
@@ -350,12 +429,178 @@ export type Database = {
           },
         ];
       };
+      time_entry_revisions: {
+        Row: {
+          changed_at: string;
+          changed_by: string;
+          company_id: string;
+          correction_request_id: string | null;
+          id: string;
+          prior_ended_at: string | null;
+          prior_note: string | null;
+          prior_project_id: string | null;
+          prior_started_at: string | null;
+          prior_task_id: string | null;
+          time_entry_id: string;
+        };
+        Insert: {
+          changed_at?: string;
+          changed_by: string;
+          company_id: string;
+          correction_request_id?: string | null;
+          id?: string;
+          prior_ended_at?: string | null;
+          prior_note?: string | null;
+          prior_project_id?: string | null;
+          prior_started_at?: string | null;
+          prior_task_id?: string | null;
+          time_entry_id: string;
+        };
+        Update: {
+          changed_at?: string;
+          changed_by?: string;
+          company_id?: string;
+          correction_request_id?: string | null;
+          id?: string;
+          prior_ended_at?: string | null;
+          prior_note?: string | null;
+          prior_project_id?: string | null;
+          prior_started_at?: string | null;
+          prior_task_id?: string | null;
+          time_entry_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "time_entry_revisions_changed_by_company_id_fkey";
+            columns: ["changed_by", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id", "company_id"];
+          },
+          {
+            foreignKeyName: "time_entry_revisions_company_id_fkey";
+            columns: ["company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "time_entry_revisions_request_id_company_id_fkey";
+            columns: ["correction_request_id", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "correction_requests";
+            referencedColumns: ["id", "company_id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
       accept_invitation: { Args: { p_token: string }; Returns: string };
+      admin_edit_entry: {
+        Args: {
+          p_ended_at?: string;
+          p_entry_id: string;
+          p_note?: string;
+          p_project_id?: string;
+          p_started_at?: string;
+          p_task_id?: string;
+        };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "time_entries";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      apply_entry_change: {
+        Args: {
+          p_changed_by: string;
+          p_ended_at: string;
+          p_entry_id: string;
+          p_note: string;
+          p_project_id: string;
+          p_request_id: string;
+          p_started_at: string;
+          p_task_id: string;
+        };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "time_entries";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      approve_correction: {
+        Args: { p_request_id: string };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          id: string;
+          kind: Database["public"]["Enums"]["correction_kind"];
+          proposed_ended_at: string | null;
+          proposed_note: string | null;
+          proposed_project_id: string | null;
+          proposed_started_at: string | null;
+          proposed_task_id: string | null;
+          reason: string;
+          requested_by: string;
+          review_note: string | null;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
+          status: Database["public"]["Enums"]["correction_status"];
+          time_entry_id: string | null;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "correction_requests";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      assert_entry_window_valid: {
+        Args: {
+          p_ended_at: string;
+          p_exclude_entry_id: string;
+          p_started_at: string;
+          p_user_id: string;
+        };
+        Returns: undefined;
+      };
+      assert_project_membership: {
+        Args: { p_project_id: string; p_user_id: string };
+        Returns: undefined;
+      };
       create_company: {
         Args: {
           p_max_timer_hours?: number;
@@ -380,6 +625,47 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       is_project_member: { Args: { p_project_id: string }; Returns: boolean };
+      record_entry_revision: {
+        Args: {
+          p_changed_by: string;
+          p_company_id: string;
+          p_prior_ended_at: string;
+          p_prior_note: string;
+          p_prior_project_id: string;
+          p_prior_started_at: string;
+          p_prior_task_id: string;
+          p_request_id: string;
+          p_time_entry_id: string;
+        };
+        Returns: undefined;
+      };
+      reject_correction: {
+        Args: { p_request_id: string; p_review_note: string };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          id: string;
+          kind: Database["public"]["Enums"]["correction_kind"];
+          proposed_ended_at: string | null;
+          proposed_note: string | null;
+          proposed_project_id: string | null;
+          proposed_started_at: string | null;
+          proposed_task_id: string | null;
+          reason: string;
+          requested_by: string;
+          review_note: string | null;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
+          status: Database["public"]["Enums"]["correction_status"];
+          time_entry_id: string | null;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "correction_requests";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
       stop_timer: {
         Args: { p_id: string };
         Returns: {
@@ -405,6 +691,8 @@ export type Database = {
       };
     };
     Enums: {
+      correction_kind: "create" | "amend" | "delete";
+      correction_status: "pending" | "approved" | "rejected" | "withdrawn";
       entry_source: "timer" | "manual";
       member_status: "active" | "inactive";
       user_role: "admin" | "employee";
@@ -538,6 +826,8 @@ export const Constants = {
   },
   public: {
     Enums: {
+      correction_kind: ["create", "amend", "delete"],
+      correction_status: ["pending", "approved", "rejected", "withdrawn"],
       entry_source: ["timer", "manual"],
       member_status: ["active", "inactive"],
       user_role: ["admin", "employee"],

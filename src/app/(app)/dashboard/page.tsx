@@ -1,3 +1,4 @@
+import { CreateCorrectionDialog } from "@/components/corrections/create-correction-dialog";
 import { DEFAULT_MAX_TIMER_HOURS } from "@/components/time-entries/elapsed";
 import { EntryList } from "@/components/time-entries/entry-list";
 import { ManualEntryDialog } from "@/components/time-entries/manual-entry-dialog";
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getCurrentMember } from "@/lib/actions/companies";
+import { listMyCorrectionRequests } from "@/lib/actions/corrections";
 import { listProjects } from "@/lib/actions/projects";
 import { getRunningTimer, listMyEntries } from "@/lib/actions/time-entries";
 
@@ -27,25 +29,45 @@ const RECENT_ENTRY_LIMIT = 10;
  * product is for, and every extra click between signing in and starting one is
  * a minute nobody logs.
  *
- * Four reads, in parallel, all of them through `lib/actions/**` (`CLAUDE.md`) —
+ * Five reads, in parallel, all of them through `lib/actions/**` (`CLAUDE.md`) —
  * no Supabase query is written in this file. Each is role- and RLS-scoped
  * already: `listProjects()` returns only assigned projects to an employee
- * (§3.6.1), and `getRunningTimer()` / `listMyEntries()` are the caller's own
- * rows even for an admin, whose SELECT policy is company-wide.
+ * (§3.6.1), and `getRunningTimer()` / `listMyEntries()` /
+ * `listMyCorrectionRequests()` are the caller's own rows even for an admin,
+ * whose SELECT policy is company-wide.
+ *
+ * The fifth is Phase 7's: an entry with a request already waiting on it is
+ * badged in the list, so "I asked about this on Monday" is visible where the
+ * entry is rather than only on `/corrections`. One indexed read, not one per
+ * row.
  */
 export default async function DashboardPage() {
-  const [memberResult, runningResult, projectsResult, entriesResult] =
-    await Promise.all([
-      getCurrentMember(),
-      getRunningTimer(),
-      listProjects(),
-      listMyEntries({ limit: RECENT_ENTRY_LIMIT }),
-    ]);
+  const [
+    memberResult,
+    runningResult,
+    projectsResult,
+    entriesResult,
+    correctionsResult,
+  ] = await Promise.all([
+    getCurrentMember(),
+    getRunningTimer(),
+    listProjects(),
+    listMyEntries({ limit: RECENT_ENTRY_LIMIT }),
+    listMyCorrectionRequests(),
+  ]);
 
   const member = memberResult.ok ? memberResult.data : null;
   const timezone = member?.company?.timezone ?? null;
   const projects = projectsResult.ok ? projectsResult.data : [];
   const running = runningResult.ok ? runningResult.data : null;
+  const isAdmin = member?.role === "admin" && member.status === "active";
+
+  const pendingCorrectionEntryIds = (
+    correctionsResult.ok ? correctionsResult.data : []
+  )
+    .filter((request) => request.status === "pending")
+    .map((request) => request.timeEntryId)
+    .filter((entryId): entryId is string => entryId !== null);
 
   // The server's clock, handed to the counter so its first client render
   // matches the HTML it hydrates. It seeds the display only — §5.3's stored
@@ -123,9 +145,16 @@ export default async function DashboardPage() {
       {projects.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-muted-foreground text-sm">
-            Worked without the timer? Add today&rsquo;s time by hand.
+            Worked without the timer? Add today&rsquo;s time by hand — or ask an
+            admin to add an earlier day.
           </p>
-          <ManualEntryDialog projects={projects} timezone={timezone} />
+          <div className="flex items-center gap-2">
+            {/* Two adjacent buttons because §7.1 draws its line between them:
+                today is an assertion the employee may make alone, any other day
+                is a proposal. Same fields either way; different consequence. */}
+            <CreateCorrectionDialog projects={projects} timezone={timezone} />
+            <ManualEntryDialog projects={projects} timezone={timezone} />
+          </div>
         </div>
       ) : null}
 
@@ -135,12 +164,19 @@ export default async function DashboardPage() {
           <CardDescription>
             The last {RECENT_ENTRY_LIMIT} entries you recorded
             {timezone ? `, shown in ${timezone}` : ""}. Only yours — an entry
-            belongs to the person who logged it.
+            belongs to the person who logged it. A closed one can&rsquo;t be
+            edited here; its menu asks for a correction instead.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {entriesResult.ok ? (
-            <EntryList entries={entriesResult.data} timezone={timezone} />
+            <EntryList
+              entries={entriesResult.data}
+              timezone={timezone}
+              projects={projects}
+              canAdminEdit={isAdmin}
+              pendingCorrectionEntryIds={pendingCorrectionEntryIds}
+            />
           ) : (
             <p className="text-destructive text-sm">{entriesResult.error}</p>
           )}

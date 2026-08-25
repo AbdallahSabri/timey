@@ -13,7 +13,13 @@
  */
 const LOCALE = "en-GB";
 
-function safeTimeZone(timezone: string | null): string {
+/**
+ * Exported for `datetime-local.ts`, which has to seed a form field with the
+ * *same* zone this module renders with: a prefilled correction proposing
+ * "14:32" must be the 14:32 the row above it shows, or the employee is
+ * proposing a time they never saw.
+ */
+export function safeTimeZone(timezone: string | null): string {
   if (!timezone) {
     return "UTC";
   }

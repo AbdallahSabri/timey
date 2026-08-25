@@ -27,10 +27,16 @@ import {
  * work actually stops. Dismissing lasts for this page load; §5.4's "on next
  * load" is what brings the prompt back.
  *
- * The second of §5.4's two offers — submit a correction with the real end time
- * — does not exist yet (Phase 7). It is described in words rather than linked,
- * because a link to a route that isn't built is worse than an honest sentence
- * about the gap.
+ * **§5.4's second offer — "submit a correction with the real end time" — has no
+ * control here, and the copy below says so plainly rather than implying a
+ * sequence.** Phase 7 built the correction flow on *closed* entries only, so
+ * from this dialog there is currently one action and one deferral. It is not
+ * reworded into "stop it now, then correct it": §7.4.1 read those two offers as
+ * alternatives and rejected the sequential reading precisely because it forces
+ * every stale timer through a materialised, fully-counted, wrong-duration entry
+ * first. The honest sentence about the gap is the one that does not quietly
+ * recommend the reading the spec turned down. Reported as an outstanding item
+ * rather than papered over here.
  */
 export function StaleTimerPrompt({
   open,
@@ -74,9 +80,9 @@ export function StaleTimerPrompt({
             guessed on your behalf either way.
           </p>
           <p>
-            Setting a real, earlier end time needs a correction request, which
-            isn&rsquo;t built yet. Stop it now and a way to fix the recorded
-            time is coming.
+            Setting a real, earlier end time needs a correction request, and
+            those can only be filed on an entry that has already stopped — so it
+            can&rsquo;t be done from here yet.
           </p>
         </div>
 

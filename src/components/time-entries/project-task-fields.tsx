@@ -30,6 +30,8 @@ export function ProjectTaskFields({
   taskField,
   projectError,
   taskError,
+  projectPlaceholder = "Pick a project…",
+  taskPlaceholder = "Pick a task…",
 }: {
   idPrefix: string;
   projects: Project[];
@@ -38,6 +40,15 @@ export function ProjectTaskFields({
   taskField: UseFormRegisterReturn;
   projectError?: { message?: string };
   taskError?: { message?: string };
+  /**
+   * Phase 7's one addition. On a timer or a manual entry the empty option is a
+   * prompt — nothing can be logged without a project. On a correction it is a
+   * *value*: blank means "leave this alone" (the `proposed_*` NULL convention),
+   * so the same control has to say "Leave unchanged" rather than "Pick a
+   * project…" or the employee reads an optional field as an unanswered one.
+   */
+  projectPlaceholder?: string;
+  taskPlaceholder?: string;
 }) {
   const tasks = taskState.status === "ready" ? taskState.tasks : [];
 
@@ -54,7 +65,7 @@ export function ProjectTaskFields({
           aria-invalid={projectError ? true : undefined}
           {...projectField}
         >
-          <option value="">Pick a project…</option>
+          <option value="">{projectPlaceholder}</option>
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.client
@@ -76,7 +87,9 @@ export function ProjectTaskFields({
           {...taskField}
         >
           <option value="">
-            {taskState.status === "loading" ? "Loading tasks…" : "Pick a task…"}
+            {taskState.status === "loading"
+              ? "Loading tasks…"
+              : taskPlaceholder}
           </option>
           {tasks.map((task) => (
             <option key={task.id} value={task.id}>

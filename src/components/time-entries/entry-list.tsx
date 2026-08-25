@@ -1,3 +1,4 @@
+import { EntryCorrectionActions } from "@/components/corrections/entry-correction-actions";
 import { formatClock } from "@/components/time-entries/elapsed";
 import { formatStartedAt } from "@/components/time-entries/format-entry";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Project } from "@/lib/actions/projects";
 import type { TimeEntryWithLabels } from "@/lib/actions/time-entries";
 
 /**
@@ -20,9 +22,20 @@ import type { TimeEntryWithLabels } from "@/lib/actions/time-entries";
  *
  * **No row is editable and none should become so.** §7.1 allows an employee to
  * edit the note on their own entry and nothing else once it closes; times on a
- * closed entry go through a correction request (Phase 7), refused at the
- * database rather than merely hidden here (§7.2). An edit control on these rows
- * would be a control whose only outcome is a permission error.
+ * closed entry go through a correction request, refused at the database rather
+ * than merely hidden here (§7.2). An edit control on these rows would be a
+ * control whose only outcome is a permission error.
+ *
+ * Phase 7 adds a menu to closed rows and does not weaken that rule by a word:
+ * every item on it either files a request for somebody else to decide, or — for
+ * an admin — calls `admin_edit_entry()`, which is a different mechanism with its
+ * own audit trail (§7.4), not this table's UPDATE policy relaxed. Running rows
+ * get no menu at all; their controls are stop and discard, on the card above.
+ *
+ * A row carrying a pending request is badged rather than locked. The request
+ * changes nothing until it is approved, so the entry below it is still the
+ * truth — and a row that silently refused a second request would hide the first
+ * one instead of explaining it.
  *
  * A label reads "—" when the project or task embed came back null: an employee
  * removed from a project keeps their entries (§2.3) but loses SELECT on the
@@ -36,9 +49,21 @@ import type { TimeEntryWithLabels } from "@/lib/actions/time-entries";
 export function EntryList({
   entries,
   timezone,
+  projects,
+  canAdminEdit,
+  pendingCorrectionEntryIds,
 }: {
   entries: TimeEntryWithLabels[];
   timezone: string | null;
+  /** Offered as the destination of a proposed move; already RLS-scoped. */
+  projects: Project[];
+  /**
+   * §7.4's direct-edit path, shown only to an admin. A convenience and not the
+   * gate: `admin_edit_entry()` calls `is_admin()` itself, and an employee who
+   * reached the RPC would be refused there.
+   */
+  canAdminEdit: boolean;
+  pendingCorrectionEntryIds: string[];
 }) {
   if (entries.length === 0) {
     return (
@@ -47,6 +72,8 @@ export function EntryList({
       </p>
     );
   }
+
+  const pending = new Set(pendingCorrectionEntryIds);
 
   return (
     <Table>
@@ -57,6 +84,9 @@ export function EntryList({
           <TableHead>Task</TableHead>
           <TableHead>Note</TableHead>
           <TableHead className="text-right">Duration</TableHead>
+          <TableHead className="w-12">
+            <span className="sr-only">Corrections</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -67,6 +97,9 @@ export function EntryList({
                 {formatStartedAt(entry.startedAt, timezone)}
                 {entry.source === "manual" ? (
                   <Badge variant="outline">Manual</Badge>
+                ) : null}
+                {pending.has(entry.id) ? (
+                  <Badge variant="secondary">Correction pending</Badge>
                 ) : null}
               </span>
             </TableCell>
@@ -83,6 +116,14 @@ export function EntryList({
               ) : (
                 formatClock(entry.durationSeconds)
               )}
+            </TableCell>
+            <TableCell className="text-right">
+              <EntryCorrectionActions
+                entry={entry}
+                projects={projects}
+                timezone={timezone}
+                canAdminEdit={canAdminEdit}
+              />
             </TableCell>
           </TableRow>
         ))}
