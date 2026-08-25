@@ -6,23 +6,15 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ---
 
-## Open — decisions owed
-
-### B-4 · Should project names be unique per company? — non-blocking
-
-**`SPEC.md` §3.4.** §3.3 (`clients`) and §3.5 (`tasks`) both specify a case-insensitive unique index scoped to active rows; §3.4 (`projects`) specifies none, and Phase 4 built exactly that — confirmed in verification, creating two projects named "Website Rebuild" in the same company succeeds. Likely an oversight rather than a deliberate asymmetry, but the spec is unambiguous as written, so implementation followed it rather than guessing.
-
-**Default if unanswered:** leave as-is — no uniqueness constraint on `projects.name`. Adding one later is a straightforward additive migration (`clients_write_error_message`-style branching in `src/lib/actions/projects.ts` already anticipates the constraint's error text, so the code change is near-zero once the index exists).
-
-### B-5 · CSV only, or PDF timesheets too? — non-blocking
-
-**`SPEC.md` §10 item 6, §9.6.** CSV export is required for v1 regardless of the answer; PDF (for signature) is the open question.
-
-**Default if unanswered:** CSV only for Phase 8. PDF generation is additive — a separate chunk with its own rendering dependency, not a blocker to shipping reporting.
-
----
-
 ## Resolved — decisions answered
+
+### D-11 · B-5 answered — CSV only, no PDF, 2026-08-25
+
+**`SPEC.md` §10 item 6, §9.6.** User confirmed the standing default rather than requesting PDF timesheets. No change: CSV export (Phase 8) is the only export format. PDF generation stays additive — a separate chunk with its own rendering dependency — if it's ever wanted later.
+
+### D-10 · B-4 answered — project names stay non-unique per company, 2026-08-25
+
+**`SPEC.md` §3.4.** User confirmed the standing default rather than adding a uniqueness constraint. No change: `projects.name` has no unique index, unlike `clients.name` and `tasks.name`, which do (§3.3, §3.5). Two projects named "Website Rebuild" in the same company remain both valid. Adding the constraint later is still a straightforward additive migration if this is ever revisited — `src/lib/actions/projects.ts` already anticipates the error text a `clients_write_error_message`-style branch would need.
 
 ### D-9 · N-6 closed — invitation emails send through Resend, provider chosen 2026-08-25
 
