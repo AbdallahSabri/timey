@@ -24,6 +24,14 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-9 · N-6 closed — invitation emails send through Resend, provider chosen 2026-08-25
+
+**`SPEC.md` §8.4, §8.4.1, §10 item 5.** Provider: Resend, picked by the user over Supabase-SMTP / SendGrid / Postmark. `createInvitation()` (`src/lib/actions/invitations.ts`) now attempts a send after the invitation row exists, via a new `src/lib/email/resend.ts` (`{ ok }`-tagged, never throws). Three new server-only env vars, all optional: `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL` — the last because a server action has no `window.location.origin` to build the emailed link from, unlike the on-screen copy link. Unset (a freshly forked template, or local dev today — none of the three are in `.env`), `createInvitation` still succeeds and returns `emailSent: false`, and `InviteLink` shows the same copyable-link fallback the product always had, just reworded to cover "not configured" and "attempt failed" as one case with one remedy. `emailSent: true` reworded it to "emailed to X, keep this copy handy."
+
+Verified: full gate green including two new tests (`src/lib/email/resend.test.ts`) covering `sendEmail`'s two not-configured branches and `escapeHtml`; confirmed via direct inspection that local dev has none of the three env vars set, so `createInvitation` exercises exactly the no-`APP_URL` → `emailSent: false` path today. **Not verified**: an actual Resend delivery — that needs the user's own API key and verified sending domain, which this session doesn't have. Whoever adds a real `RESEND_API_KEY` should send one test invitation and confirm it lands before relying on this in production.
+
+Deliberately out of scope: Supabase Auth's own emails (§8.3.2's signup confirmation, password reset) are a separate GoTrue-owned delivery path, configured via SMTP settings on a hosted project rather than through this module. Revisit only if those need real delivery too.
+
 ### D-8 · N-3 closed — email-confirmation callback route built and walked end to end, 2026-08-25
 
 **`SPEC.md` §8.3, §8.3.2.** `GET /auth/confirm` (`src/app/auth/confirm/route.ts`) exchanges the emailed link's `token_hash` for a session via `verifyOtp()`, then redirects to `next` (validated through `safeNextPath`, default `/dashboard`) or, on any failure, to `/sign-in?error=confirmation_failed` — which now renders a plain-language explanation instead of a silent bounce. Added to middleware's public paths, since its visitor is signed out by definition until the route itself creates a session. `supabase/templates/confirmation.html` + a new `[auth.email.template.confirmation]` block in `config.toml` override Supabase's default "Confirm signup" email to link here instead of its own hosted verify endpoint. Verified for real, not just typechecked: flipped `enable_confirmations = true` locally, signed up through the actual Auth API, pulled the real email out of Mailpit, followed its link, confirmed the session cookie landed and a limbo user reached `/onboarding` through ordinary middleware routing, exercised the invalid-token path too, then flipped the setting back off and deleted the test user — local dev's default (confirmations off) is unchanged.
@@ -89,19 +97,6 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 The dashboard queried `profiles`/`companies` directly in a Server Component (an explicitly allowed read-only exception, not a new server action). Phase 3's member list and admin-gating UI wanted the same "current member + company + role" read.
 
 **Closed:** `getCurrentMember()` exists in `src/lib/actions/companies.ts` and is now the only path — `/dashboard`, `/members`, and `/invite/[token]` all call it, and no page queries `profiles` inline any more.
-
-### N-6 · No email delivery for invitations (Phase 3)
-
-`SPEC.md` §8.4 describes the raw token as appearing "only in the emailed URL", and `PLAN.md` Phase 3 lists invite email as required (§10 item 5). **No email provider is wired up.** Nothing sends anything.
-
-Phase 3 ships the link instead: `createInvitation` returns the raw token once, and `/members` renders `${origin}/invite/{token}` with a copy button and the on-screen caveat *"Share this link directly — email delivery isn't set up yet."* The admin pastes it into whatever channel they already use.
-
-Two consequences worth stating rather than discovering:
-
-- **The link is shown exactly once.** Only the SHA-256 is stored (§8.4), so navigating away from the page loses the raw token permanently — the remedy is revoke + re-invite, and the UI says so.
-- **The channel is now the admin's problem.** A token pasted into a shared Slack channel is a bearer credential for one specific address; the §8.4.1 email match is what keeps it from being a bearer credential for *anyone*.
-
-Not blocking Phase 3 — the flow is complete and verifiable without it. It becomes blocking for anything resembling real use, and it needs a provider decision plus a server-side send, which is `implement-logic` territory rather than a UI change.
 
 ### N-1 · Node version below the declared engine floor
 

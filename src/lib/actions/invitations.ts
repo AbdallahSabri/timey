@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 // Type-only, so it is erased at build time and does not pull another
 // "use server" module into this one's graph.
 import type { ActionResult } from "@/lib/actions/auth";
+import { escapeHtml, sendEmail } from "@/lib/email/resend";
 import { createClient } from "@/lib/supabase/server";
 import {
   invitationIdSchema,
@@ -174,8 +175,16 @@ export async function listInvitations(): Promise<
  * nowhere but the caller's variable. Never log it — a log line with the raw
  * token in it is the leaked-backup scenario §8.4 exists to prevent.
  *
- * Building the shareable `/invite/{token}` URL is the caller's job; a server
- * action has no reliable view of the request origin.
+ * Building the shareable `/invite/{token}` URL for on-screen copy is the
+ * caller's job; a server action has no reliable view of the request origin
+ * (`InviteLink` reads `window.location.origin`). The email this action sends
+ * itself (`BLOCKERS.md` N-6) needs that same URL from a context with no
+ * window, which is what the server-only `APP_URL` env var is for — a trusted
+ * value an admin cannot influence, unlike a client-supplied origin would be.
+ * `emailSent` on the result tells the caller which fallback copy to show; the
+ * invitation itself is created either way; a copyable link stays the ground
+ * truth (`accept_invitation()` only ever sees the token, never how it got to
+ * the invitee).
  *
  * §8.4's "re-inviting replaces the outstanding invitation" is delete-then-
  * insert, not atomic (§8.4.1). The partial unique index makes stacking
@@ -184,7 +193,9 @@ export async function listInvitations(): Promise<
  */
 export async function createInvitation(
   input: InviteMemberInput,
-): Promise<ActionResult<{ token: string; expiresAt: string }>> {
+): Promise<
+  ActionResult<{ token: string; expiresAt: string; emailSent: boolean }>
+> {
   const parsed = inviteMemberSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -198,6 +209,7 @@ export async function createInvitation(
   const rawToken = randomBytes(TOKEN_BYTES).toString("hex");
 
   let expiresAt: string;
+  let companyName: string;
   try {
     const supabase = await createClient();
 
@@ -218,7 +230,7 @@ export async function createInvitation(
     // row even in limbo (§4.2.1).
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("company_id")
+      .select("company_id, companies (name)")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -265,12 +277,66 @@ export async function createInvitation(
     }
 
     expiresAt = invitation.expires_at;
+    companyName = profile.companies?.name ?? "your company";
   } catch {
     return { ok: false, error: NOT_CONFIGURED };
   }
 
+  // Best-effort, and deliberately outside the try/catch above: the
+  // invitation row already exists and its link already works, so a provider
+  // outage or a missing `APP_URL`/`RESEND_API_KEY` must not turn a created
+  // invitation into a reported failure — only into a caller that knows to
+  // fall back to the copyable link (`emailSent: false`).
+  const emailSent = await sendInvitationEmail({
+    to: email,
+    companyName,
+    role,
+    inviteUrl: buildInviteUrl(rawToken),
+    expiresAt,
+  });
+
   revalidatePath("/", "layout");
-  return { ok: true, data: { token: rawToken, expiresAt } };
+  return { ok: true, data: { token: rawToken, expiresAt, emailSent } };
+}
+
+/**
+ * `APP_URL` is the one env var this module needs beyond Supabase's: a
+ * trusted, server-configured origin for a link going into an email, where
+ * `InviteLink`'s `window.location.origin` isn't reachable. Unset (a freshly
+ * forked template, same as a missing Resend key) means "don't send" rather
+ * than a guess — a wrong origin baked into a real email is worse than no
+ * email.
+ */
+function buildInviteUrl(rawToken: string): string | null {
+  const appUrl = process.env.APP_URL;
+  if (!appUrl) {
+    return null;
+  }
+  return `${appUrl.replace(/\/+$/, "")}/invite/${rawToken}`;
+}
+
+async function sendInvitationEmail(input: {
+  to: string;
+  companyName: string;
+  role: string;
+  inviteUrl: string | null;
+  expiresAt: string;
+}): Promise<boolean> {
+  if (!input.inviteUrl) {
+    return false;
+  }
+
+  const expiry = new Date(input.expiresAt).toUTCString();
+  const company = escapeHtml(input.companyName);
+  const url = escapeHtml(input.inviteUrl);
+
+  const result = await sendEmail({
+    to: input.to,
+    subject: `You've been invited to join ${input.companyName} on Timey`,
+    html: `<p>You've been invited to join <strong>${company}</strong> on Timey as ${escapeHtml(input.role)}.</p><p><a href="${url}">Accept the invitation</a></p><p>This link expires ${expiry}. If the button doesn't work, copy this URL: ${url}</p>`,
+  });
+
+  return result.ok;
 }
 
 /**

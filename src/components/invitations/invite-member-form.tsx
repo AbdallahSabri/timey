@@ -28,7 +28,7 @@ import {
 const selectClassName =
   "border-input focus-visible:border-ring focus-visible:ring-ring/50 disabled:bg-input/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30 dark:aria-invalid:border-destructive/50 h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-base transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:ring-3 md:text-sm";
 
-type MintedInvitation = { email: string; path: string };
+type MintedInvitation = { email: string; path: string; emailSent: boolean };
 
 /**
  * The link is assembled from `window.location.origin` at render time rather
@@ -38,6 +38,12 @@ type MintedInvitation = { email: string; path: string };
  * deployment says they are, while the browser already knows the URL the admin
  * is reading this on. This block only ever renders after a client-side submit,
  * so there is no server pass to disagree with.
+ *
+ * The email `createInvitation` sends itself (`BLOCKERS.md` N-6) is a
+ * different link built server-side from `APP_URL` — same token, same
+ * destination, just assembled from a trusted env var instead of the browser.
+ * This copyable one stays regardless: `emailSent` only changes which
+ * sentence explains why it's here.
  */
 function InviteLink({ invitation }: { invitation: MintedInvitation }) {
   const [copied, setCopied] = useState(false);
@@ -63,8 +69,10 @@ function InviteLink({ invitation }: { invitation: MintedInvitation }) {
           Invitation link for {invitation.email}
         </p>
         <p className="text-muted-foreground text-sm">
-          Share this link directly — email delivery isn&apos;t set up yet. It
-          appears once: leaving this page loses it, and a lost link means
+          {invitation.emailSent
+            ? `Emailed to ${invitation.email}. Keep this copy handy in case it lands in spam or doesn't arrive.`
+            : "Couldn't send an email for this one — email delivery isn't set up, or the attempt failed. Share this link directly."}{" "}
+          It appears once: leaving this page loses it, and a lost link means
           revoking the invitation and sending a new one.
         </p>
       </div>
@@ -121,6 +129,7 @@ export function InviteMemberForm() {
     setInvitation({
       email: values.email,
       path: `/invite/${result.data.token}`,
+      emailSent: result.data.emailSent,
     });
     form.reset({ email: "", role: values.role });
     router.refresh();

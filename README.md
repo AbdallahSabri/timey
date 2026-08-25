@@ -36,8 +36,11 @@ Set `NEXT_PUBLIC_SUPABASE_URL` to the API URL and `NEXT_PUBLIC_SUPABASE_ANON_KEY
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server Supabase clients | Yes — inlined at **build time** |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + server Supabase clients | Yes — inlined at **build time** |
+| `RESEND_API_KEY` | Invitation emails (`src/lib/email/resend.ts`) | No — server only |
+| `EMAIL_FROM` | Invitation emails | No — server only |
+| `APP_URL` | Building the invite link inside the email | No — server only |
 
-Get these from your Supabase project's **Settings → API**. Copy `.env.example` to `.env.local` for local dev.
+Get the Supabase two from your project's **Settings → API**. The last three are optional — unset, invitation creation still works, it just falls back to a copyable link instead of sending an email; see `.env.example` for where to get a Resend key. Copy `.env.example` to `.env.local` for local dev.
 
 **There is no service-role key in this project, by design.** Anything needing elevated privilege is a `SECURITY DEFINER` Postgres function with a narrow signature, never a key handed to application code — see `SPEC.md` §4.4.
 
@@ -98,7 +101,7 @@ This repo ships a multi-stage `Dockerfile` (`deps` → `builder` → `runner`) p
 
 1. **Connect the repo** in Coolify as a new Docker-based application, pointing at this repository/branch.
 2. **Set build-time env vars** — Coolify needs to pass `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` as **Docker build args**, since Next.js inlines `NEXT_PUBLIC_*` vars into the client bundle at build time. In Coolify's build settings, add them as build arguments (not just runtime env vars) — see the `ARG`/`ENV` pairs in the `builder` stage of the `Dockerfile`.
-3. **Set runtime env vars** — anything server-only goes in Coolify's regular environment variable config, injected at container start and never baked into the image. The app currently needs none: the two `NEXT_PUBLIC_*` vars above are build-time, and there is no service-role key (`SPEC.md` §4.4).
+3. **Set runtime env vars** — anything server-only goes in Coolify's regular environment variable config, injected at container start and never baked into the image. The two `NEXT_PUBLIC_*` vars above are build-time, and there is no service-role key (`SPEC.md` §4.4); `RESEND_API_KEY`, `EMAIL_FROM` and `APP_URL` are the only server-only vars the app reads, and only invitation email delivery depends on them — everything else works with none of the three set.
 4. **Expose port 3000** — the container listens on `3000` (`EXPOSE 3000`, `PORT=3000` in the `Dockerfile`).
 5. **Health check** — point Coolify's health check at `/api/health`. It always returns `200` with a JSON body (`{ status: "ok", supabase: "connected" | "unreachable", timestamp }`) so a transient Supabase outage doesn't flap the container's liveness state.
 6. **Auto-deploy on push** — enable Coolify's webhook/auto-deploy for your branch so pushes trigger a rebuild.
