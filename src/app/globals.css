@@ -2,14 +2,18 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* `:where(.dark, .dark *)` rather than `:is(.dark *)`: `next-themes` writes the
+   class onto `<html>` itself, and a descendant-only selector silently drops any
+   `dark:` utility applied to that element. `:where` keeps specificity at 0 so
+   the variant composes the same way the generated one did. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-geist-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -27,6 +31,8 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-live-foreground: var(--live-foreground);
+  --color-live: var(--live);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -46,75 +52,125 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Elevation reads through `--shadow-1..3`, which are redefined per theme
+     below — in light they are a tinted ink, in dark they are true black, since
+     a dark surface is lifted by lightness and only grounded by shadow. */
+  --shadow-xs: 0 1px 2px 0 var(--shadow-1);
+  --shadow-sm: 0 1px 2px 0 var(--shadow-1), 0 1px 3px 0 var(--shadow-2);
+  --shadow-md: 0 2px 4px -1px var(--shadow-1), 0 4px 10px -2px var(--shadow-2);
+  --shadow-lg: 0 4px 8px -2px var(--shadow-2), 0 16px 32px -8px var(--shadow-3);
 }
 
+@theme {
+  /* Not `inline`: this one has to reach `:root` as a real custom property,
+     because plain CSS below and the tab bar's own spacing both read it. */
+  --mobile-tab-bar-height: 3.5rem;
+}
+
+/**
+ * Ledger green + live amber.
+ *
+ * Two hues, each standing for a state this app actually has rather than for
+ * decoration: green is the settled record and every action that writes one,
+ * amber is a timer that is still running — and nothing else. The neutrals carry
+ * a faint warm cast (hue ~90-100 at very low chroma) so a surface reads as
+ * chosen rather than as an untouched `#fff` / `#000`.
+ *
+ * Anything that is a duration or a clock time is set in `--font-mono` with
+ * `tabular-nums`. In a timesheet, a column of durations that do not align is a
+ * legibility failure, not a stylistic preference.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  color-scheme: light;
+
+  --background: oklch(0.986 0.002 90);
+  --foreground: oklch(0.18 0.007 100);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.18 0.007 100);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --popover-foreground: oklch(0.18 0.007 100);
+  --primary: oklch(0.52 0.088 158);
+  --primary-foreground: oklch(0.985 0.004 100);
+  --secondary: oklch(0.96 0.004 90);
+  --secondary-foreground: oklch(0.28 0.01 100);
+  --muted: oklch(0.96 0.004 90);
+  --muted-foreground: oklch(0.52 0.009 95);
+  --accent: oklch(0.955 0.01 155);
+  --accent-foreground: oklch(0.3 0.04 158);
+  --destructive: oklch(0.495 0.16 28);
+  --live: oklch(0.62 0.13 62);
+  --live-foreground: oklch(0.985 0.004 100);
+  --border: oklch(0.914 0.005 90);
+  --input: oklch(0.914 0.005 90);
+  --ring: oklch(0.52 0.088 158);
+  --chart-1: oklch(0.52 0.088 158);
+  --chart-2: oklch(0.62 0.075 130);
+  --chart-3: oklch(0.7 0.09 95);
+  --chart-4: oklch(0.68 0.12 75);
+  --chart-5: oklch(0.62 0.13 62);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --shadow-1: oklch(0.18 0.007 100 / 0.04);
+  --shadow-2: oklch(0.18 0.007 100 / 0.07);
+  --shadow-3: oklch(0.18 0.007 100 / 0.1);
+  --sidebar: oklch(0.972 0.004 90);
+  --sidebar-foreground: oklch(0.18 0.007 100);
+  --sidebar-primary: oklch(0.52 0.088 158);
+  --sidebar-primary-foreground: oklch(0.985 0.004 100);
+  --sidebar-accent: oklch(0.955 0.01 155);
+  --sidebar-accent-foreground: oklch(0.3 0.04 158);
+  --sidebar-border: oklch(0.914 0.005 90);
+  --sidebar-ring: oklch(0.52 0.088 158);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+
+  --background: oklch(0.168 0.004 100);
+  --foreground: oklch(0.962 0.004 95);
+  --card: oklch(0.218 0.004 100);
+  --card-foreground: oklch(0.962 0.004 95);
+  --popover: oklch(0.218 0.004 100);
+  --popover-foreground: oklch(0.962 0.004 95);
+  /* Lightened well past the light-mode green: the same ink on a dark ground
+     would sit at roughly 2:1 against it. */
+  --primary: oklch(0.709 0.09 158);
+  --primary-foreground: oklch(0.18 0.02 158);
+  --secondary: oklch(0.28 0.005 100);
+  --secondary-foreground: oklch(0.962 0.004 95);
+  --muted: oklch(0.28 0.005 100);
+  /* Measured, not eyeballed. At 0.665 this sat at 5.7:1 on `--card` — a pass
+     on paper and too dim in practice, and it is the most-used colour in the
+     app (every card description, field label and table cell reads through it).
+     0.738 puts it at 7.5:1, comfortably AAA at the small sizes it is used. */
+  --muted-foreground: oklch(0.738 0.01 92);
+  --accent: oklch(0.29 0.018 158);
+  --accent-foreground: oklch(0.9 0.03 158);
+  --destructive: oklch(0.717 0.15 25);
+  --live: oklch(0.745 0.125 65);
+  --live-foreground: oklch(0.2 0.03 65);
+  /* Both were effectively invisible — 1.25:1 and 1.37:1 on `--card`, against
+     the 3:1 that WCAG 1.4.11 asks of a control boundary. `--input` now clears
+     it outright; `--border` is deliberately left below, at 2.2:1, because it
+     also draws plain dividers and a 3:1 hairline everywhere reads as a cage. */
+  --border: oklch(0.436 0.005 95);
+  --input: oklch(0.508 0.005 95);
+  --ring: oklch(0.709 0.09 158);
+  --chart-1: oklch(0.709 0.09 158);
+  --chart-2: oklch(0.72 0.08 130);
+  --chart-3: oklch(0.79 0.09 95);
+  --chart-4: oklch(0.775 0.115 75);
+  --chart-5: oklch(0.745 0.125 65);
+  --shadow-1: oklch(0 0 0 / 0.2);
+  --shadow-2: oklch(0 0 0 / 0.3);
+  --shadow-3: oklch(0 0 0 / 0.45);
+  --sidebar: oklch(0.195 0.004 100);
+  --sidebar-foreground: oklch(0.962 0.004 95);
+  --sidebar-primary: oklch(0.709 0.09 158);
+  --sidebar-primary-foreground: oklch(0.18 0.02 158);
+  --sidebar-accent: oklch(0.29 0.018 158);
+  --sidebar-accent-foreground: oklch(0.9 0.03 158);
+  --sidebar-border: oklch(0.436 0.005 95);
+  --sidebar-ring: oklch(0.709 0.09 158);
 }
 
 @layer base {
@@ -126,5 +182,90 @@
   }
   html {
     @apply font-sans;
+  }
+  /* Headings are the one place the sans face is tightened. The type does not
+     need a second family to carry the personality — the clock does that. */
+  h1,
+  h2,
+  h3 {
+    @apply font-heading tracking-tight;
+  }
+}
+
+/**
+ * `src/components/ui/**` is shadcn-CLI-managed and not hand-edited (`CLAUDE.md`),
+ * so the corrections below are expressed against the `data-slot`
+ * attributes those primitives already emit rather than as edits to them.
+ */
+
+/* 1. Touch targets. The Nova preset is deliberately compact — a default button
+      and an input are both 32px — which is right for a pointer and below the
+      44px guideline for a finger. Raise it only where the pointer is coarse, so
+      the desktop density is kept exactly as the preset ships it. */
+@media (pointer: coarse) {
+  /* Plain `select` rather than a slot: the native select is hand-rolled from a
+     shared class string (`structure/select-class.ts`), not a primitive, and
+     every one in this app is a form control that a finger has to hit. */
+  select,
+  [data-slot="button"],
+  [data-slot="input"],
+  [data-slot="dropdown-menu-item"],
+  [data-slot="dropdown-menu-checkbox-item"],
+  [data-slot="dropdown-menu-radio-item"] {
+    min-height: 2.75rem;
+  }
+
+  [data-slot="button"][data-size="icon"],
+  [data-slot="button"][data-size="icon-xs"],
+  [data-slot="button"][data-size="icon-sm"],
+  [data-slot="button"][data-size="icon-lg"] {
+    min-width: 2.75rem;
+  }
+}
+
+/* 2. Card and dialog edges in dark. Both primitives ring themselves with
+      `ring-foreground/10`, which over a dark surface computes to 1.31:1 — the
+      panel edge is effectively not drawn, and a page of cards reads as one flat
+      wash. Retarget the ring at `--border`, the same token every other divider
+      uses, so a card has an edge for the same reason a table row does. The
+      running timer states its own ring, and those two are excluded by name —
+      every card carries `ring-1`, so a blanket `[class*="ring-"]` guard would
+      match all of them and this rule would never apply to anything. */
+.dark
+  [data-slot="card"]:not([class*="ring-live"]):not([class*="ring-destructive"]),
+.dark [data-slot="dialog-content"] {
+  --tw-ring-color: var(--border);
+}
+
+/* 3. A dialog sets no height bound, so a tall form — manual entry, amend
+      correction — grows past the viewport on a phone with the keyboard up and
+      there is no way to reach the submit button. `100dvh` rather than `100vh`
+      so the bound follows the collapsing mobile browser chrome. */
+[data-slot="dialog-content"] {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 4. Every list table is replaced by cards below `md`, which leaves the report
+      grid as the one thing that still scrolls sideways there — deliberately, as
+      it is a comparison whose columns and footer total are the point. Fade its
+      edges so it is visible that the grid continues. `scroll-fade-x` ships with
+      `shadcn/tailwind.css`; the scrolling element is the primitive's own
+      container, which is only reachable by attribute. */
+@media (width < 48rem) {
+  [data-slot="table-container"] {
+    @apply scroll-fade-x;
+  }
+}
+
+/* 5. Sonner anchors itself to the bottom of the viewport, which is where the
+      mobile tab bar now lives. Lift it clear below `md`; the desktop offset is
+      untouched because the bar is not rendered there. */
+@media (width < 48rem) {
+  [data-sonner-toaster][data-y-position="bottom"] {
+    bottom: calc(
+      var(--mobile-tab-bar-height) + env(safe-area-inset-bottom) + 1rem
+    );
   }
 }

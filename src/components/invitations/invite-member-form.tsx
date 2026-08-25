@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { nativeSelectClassName } from "@/components/structure/select-class";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -23,10 +24,6 @@ import {
   type InviteMemberInput,
   type InviteMemberValues,
 } from "@/lib/validations/invitations";
-
-/** Matches `Input`'s surface so the native select reads as one of the family. */
-const selectClassName =
-  "border-input focus-visible:border-ring focus-visible:ring-ring/50 disabled:bg-input/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30 dark:aria-invalid:border-destructive/50 h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-base transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:ring-3 md:text-sm";
 
 type MintedInvitation = { email: string; path: string; emailSent: boolean };
 
@@ -163,7 +160,7 @@ export function InviteMemberForm() {
               <FieldLabel htmlFor="invite-role">Role</FieldLabel>
               <select
                 id="invite-role"
-                className={cn(selectClassName)}
+                className={cn(nativeSelectClassName)}
                 aria-invalid={errors.role ? true : undefined}
                 {...form.register("role")}
               >

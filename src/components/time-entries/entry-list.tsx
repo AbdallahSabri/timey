@@ -1,6 +1,8 @@
 import { EntryCorrectionActions } from "@/components/corrections/entry-correction-actions";
+import { DataCard, DataCardList } from "@/components/structure/data-card";
 import { formatClock } from "@/components/time-entries/elapsed";
 import { formatStartedAt } from "@/components/time-entries/format-entry";
+import { RunningBadge } from "@/components/time-entries/running-badge";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -76,58 +78,112 @@ export function EntryList({
   const pending = new Set(pendingCorrectionEntryIds);
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Started</TableHead>
-          <TableHead>Project</TableHead>
-          <TableHead>Task</TableHead>
-          <TableHead>Note</TableHead>
-          <TableHead className="text-right">Duration</TableHead>
-          <TableHead className="w-12">
-            <span className="sr-only">Corrections</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <>
+      {/* Below `md` the same rows, restated as cards — see `DataCard`. The
+          project and task are the identity of an entry, so they lead; the
+          duration is what you came to read, so it is the one numeric field. */}
+      <DataCardList className="md:hidden">
         {entries.map((entry) => (
-          <TableRow key={entry.id}>
-            <TableCell className="whitespace-nowrap">
-              <span className="flex items-center gap-2">
-                {formatStartedAt(entry.startedAt, timezone)}
+          <DataCard
+            key={entry.id}
+            title={`${entry.project?.name ?? "—"} · ${entry.task?.name ?? "—"}`}
+            meta={
+              <>
                 {entry.source === "manual" ? (
                   <Badge variant="outline">Manual</Badge>
                 ) : null}
                 {pending.has(entry.id) ? (
                   <Badge variant="secondary">Correction pending</Badge>
                 ) : null}
-              </span>
-            </TableCell>
-            <TableCell className="font-medium">
-              {entry.project?.name ?? "—"}
-            </TableCell>
-            <TableCell>{entry.task?.name ?? "—"}</TableCell>
-            <TableCell className="text-muted-foreground max-w-[16rem] truncate">
-              {entry.note ?? "—"}
-            </TableCell>
-            <TableCell className="text-right font-mono tabular-nums">
-              {entry.durationSeconds === null ? (
-                <Badge variant="secondary">Running</Badge>
-              ) : (
-                formatClock(entry.durationSeconds)
-              )}
-            </TableCell>
-            <TableCell className="text-right">
+              </>
+            }
+            action={
               <EntryCorrectionActions
                 entry={entry}
                 projects={projects}
                 timezone={timezone}
                 canAdminEdit={canAdminEdit}
               />
-            </TableCell>
-          </TableRow>
+            }
+            fields={[
+              {
+                label: "Started",
+                value: formatStartedAt(entry.startedAt, timezone),
+                numeric: true,
+              },
+              {
+                label: "Duration",
+                value:
+                  entry.durationSeconds === null ? (
+                    <RunningBadge />
+                  ) : (
+                    formatClock(entry.durationSeconds)
+                  ),
+                numeric: entry.durationSeconds !== null,
+              },
+              ...(entry.note ? [{ label: "Note", value: entry.note }] : []),
+            ]}
+          />
         ))}
-      </TableBody>
-    </Table>
+      </DataCardList>
+
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Started</TableHead>
+              <TableHead>Project</TableHead>
+              <TableHead>Task</TableHead>
+              <TableHead>Note</TableHead>
+              <TableHead className="text-right">Duration</TableHead>
+              <TableHead className="w-12">
+                <span className="sr-only">Corrections</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {entries.map((entry) => (
+              <TableRow key={entry.id}>
+                <TableCell className="whitespace-nowrap">
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono tabular-nums">
+                      {formatStartedAt(entry.startedAt, timezone)}
+                    </span>
+                    {entry.source === "manual" ? (
+                      <Badge variant="outline">Manual</Badge>
+                    ) : null}
+                    {pending.has(entry.id) ? (
+                      <Badge variant="secondary">Correction pending</Badge>
+                    ) : null}
+                  </span>
+                </TableCell>
+                <TableCell className="font-medium">
+                  {entry.project?.name ?? "—"}
+                </TableCell>
+                <TableCell>{entry.task?.name ?? "—"}</TableCell>
+                <TableCell className="text-muted-foreground max-w-[10rem] truncate lg:max-w-[16rem]">
+                  {entry.note ?? "—"}
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums">
+                  {entry.durationSeconds === null ? (
+                    <RunningBadge />
+                  ) : (
+                    formatClock(entry.durationSeconds)
+                  )}
+                </TableCell>
+                <TableCell className="text-right">
+                  <EntryCorrectionActions
+                    entry={entry}
+                    projects={projects}
+                    timezone={timezone}
+                    canAdminEdit={canAdminEdit}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }

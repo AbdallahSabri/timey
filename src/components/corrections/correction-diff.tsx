@@ -1,5 +1,6 @@
 import { formatStartedAt } from "@/components/time-entries/format-entry";
 import type { CorrectionRequestWithContext } from "@/lib/actions/corrections";
+import { cn } from "@/lib/utils";
 
 /**
  * What the entry is now, beside what the request proposes it should be.
@@ -97,8 +98,13 @@ export function CorrectionDiff({
       ) : (
         <div className="border-border overflow-hidden rounded-md border">
           <div className="divide-border divide-y">
+            {/* Column headings only mean anything once there are columns, so
+                they are held back until `sm`. Below that the pair is read
+                inline as `now → proposed` instead — two timestamps squeezed
+                into ~100px each are damage, not a comparison, and an arrow says
+                which way the change runs without repeating either heading. */}
             {showsBefore && showsAfter ? (
-              <div className="text-muted-foreground bg-muted/50 grid grid-cols-[6rem_1fr_1fr] gap-2 px-3 py-1.5 text-xs font-medium">
+              <div className="text-muted-foreground bg-muted/50 hidden gap-2 px-3 py-1.5 text-xs font-medium sm:grid sm:grid-cols-[6rem_1fr_1fr]">
                 <span>
                   <span className="sr-only">Field</span>
                 </span>
@@ -110,27 +116,46 @@ export function CorrectionDiff({
             {rows.map((row) => (
               <div
                 key={row.label}
-                className={
+                className={cn(
+                  "grid gap-x-2 gap-y-0.5 px-3 py-1.5 text-sm sm:items-baseline sm:gap-2",
                   showsBefore && showsAfter
-                    ? "grid grid-cols-[6rem_1fr_1fr] items-baseline gap-2 px-3 py-1.5 text-sm"
-                    : "grid grid-cols-[6rem_1fr] items-baseline gap-2 px-3 py-1.5 text-sm"
-                }
+                    ? "sm:grid-cols-[6rem_1fr_1fr]"
+                    : "grid-cols-[6rem_1fr] items-baseline",
+                )}
               >
                 <span className="text-muted-foreground text-xs">
                   {row.label}
                 </span>
-                {showsBefore ? (
-                  <span className="break-words">
-                    {row.before ?? UNREADABLE}
-                  </span>
-                ) : null}
-                {showsAfter ? (
-                  row.after === null ? (
-                    <span className="text-muted-foreground">unchanged</span>
-                  ) : (
-                    <span className="font-medium break-words">{row.after}</span>
-                  )
-                ) : null}
+                {/* `sm:contents` dissolves this wrapper at the breakpoint, so
+                    the two values become grid cells again and land back under
+                    their own headings. */}
+                <div className="flex flex-wrap items-baseline gap-x-1.5 sm:contents">
+                  {showsBefore ? (
+                    <span className="break-words">
+                      {row.before ?? UNREADABLE}
+                    </span>
+                  ) : null}
+                  {showsBefore && showsAfter ? (
+                    <span
+                      className="text-muted-foreground sm:hidden"
+                      aria-hidden
+                    >
+                      →
+                    </span>
+                  ) : null}
+                  {showsAfter ? (
+                    <span
+                      className={cn(
+                        "break-words",
+                        row.after === null
+                          ? "text-muted-foreground"
+                          : "font-medium",
+                      )}
+                    >
+                      {row.after === null ? "unchanged" : row.after}
+                    </span>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

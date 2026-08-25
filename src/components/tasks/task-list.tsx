@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { ArchiveDialog } from "@/components/structure/archive-dialog";
+import { DataCard, DataCardList } from "@/components/structure/data-card";
 import {
   Table,
   TableBody,
@@ -59,47 +60,76 @@ export function TaskList({
     );
   }
 
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Task</TableHead>
-          <TableHead>Status</TableHead>
-          {canManage ? (
-            <TableHead className="w-28">
-              <span className="sr-only">Actions</span>
-            </TableHead>
-          ) : null}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {tasks.map((task) => {
-          const isArchived = task.archivedAt !== null;
+  function archiveControl(task: Task) {
+    if (!canManage || task.archivedAt !== null) {
+      return null;
+    }
 
-          return (
-            <TableRow
-              key={task.id}
-              className={cn(isArchived && "text-muted-foreground")}
-            >
-              <TableCell className="font-medium">{task.name}</TableCell>
-              <TableCell>{isArchived ? "Archived" : "Active"}</TableCell>
+    return (
+      <ArchiveDialog
+        title={`Archive ${task.name}?`}
+        description="Time already logged against it keeps this label. It leaves the pickers and cannot be un-archived — the name is released when it goes, so a restore could collide with a task created since."
+        triggerAriaLabel={`Archive ${task.name}`}
+        disabled={pendingId === task.id}
+        onConfirm={() => archive(task)}
+      />
+    );
+  }
+
+  return (
+    <>
+      <DataCardList className="md:hidden">
+        {tasks.map((task) => (
+          <DataCard
+            key={task.id}
+            title={task.name}
+            muted={task.archivedAt !== null}
+            action={archiveControl(task)}
+            fields={[
+              {
+                label: "Status",
+                value: task.archivedAt !== null ? "Archived" : "Active",
+              },
+            ]}
+          />
+        ))}
+      </DataCardList>
+
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Task</TableHead>
+              <TableHead>Status</TableHead>
               {canManage ? (
-                <TableCell className="text-right">
-                  {isArchived ? null : (
-                    <ArchiveDialog
-                      title={`Archive ${task.name}?`}
-                      description="Time already logged against it keeps this label. It leaves the pickers and cannot be un-archived — the name is released when it goes, so a restore could collide with a task created since."
-                      triggerAriaLabel={`Archive ${task.name}`}
-                      disabled={pendingId === task.id}
-                      onConfirm={() => archive(task)}
-                    />
-                  )}
-                </TableCell>
+                <TableHead className="w-28">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               ) : null}
             </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+          </TableHeader>
+          <TableBody>
+            {tasks.map((task) => {
+              const isArchived = task.archivedAt !== null;
+
+              return (
+                <TableRow
+                  key={task.id}
+                  className={cn(isArchived && "text-muted-foreground")}
+                >
+                  <TableCell className="font-medium">{task.name}</TableCell>
+                  <TableCell>{isArchived ? "Archived" : "Active"}</TableCell>
+                  {canManage ? (
+                    <TableCell className="text-right">
+                      {archiveControl(task)}
+                    </TableCell>
+                  ) : null}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }

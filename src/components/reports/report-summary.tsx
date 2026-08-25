@@ -1,6 +1,11 @@
 import { Card, CardContent } from "@/components/ui/card";
 import type { ReportSummary } from "@/lib/actions/reports";
 import { formatSecondsHms } from "@/lib/reports/csv";
+import { cn } from "@/lib/utils";
+
+/** The three figures are set alike, and like the running clock they echo. */
+const FIGURE_CLASS =
+  "font-mono text-3xl leading-none font-medium tracking-tight tabular-nums";
 
 /**
  * §9.4's header figures, above whichever grouping is on screen.
@@ -29,7 +34,7 @@ export function ReportSummaryHeader({
       <CardContent className="grid gap-6 sm:grid-cols-3">
         <div className="flex flex-col gap-1">
           <span className="text-muted-foreground text-sm">Total time</span>
-          <span className="font-mono text-3xl tabular-nums">
+          <span className={FIGURE_CLASS}>
             {formatSecondsHms(summary.totalSeconds)}
           </span>
           <span className="text-muted-foreground text-xs">{rangeLabel}</span>
@@ -37,9 +42,7 @@ export function ReportSummaryHeader({
 
         <div className="flex flex-col gap-1">
           <span className="text-muted-foreground text-sm">Entries</span>
-          <span className="font-mono text-3xl tabular-nums">
-            {summary.entryCount}
-          </span>
+          <span className={FIGURE_CLASS}>{summary.entryCount}</span>
           <span className="text-muted-foreground text-xs">
             Closed entries in this range
           </span>
@@ -47,7 +50,14 @@ export function ReportSummaryHeader({
 
         <div className="flex flex-col gap-1">
           <span className="text-muted-foreground text-sm">Running now</span>
-          <span className="font-mono text-3xl tabular-nums">
+          {/* Amber only when there is something in flight — the colour marks a
+              live timer, and a zero is not one. */}
+          <span
+            className={cn(
+              FIGURE_CLASS,
+              summary.runningCount > 0 && "text-live",
+            )}
+          >
             {summary.runningCount}
           </span>
           <span className="text-muted-foreground text-xs">
