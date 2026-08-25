@@ -281,6 +281,18 @@ $$ select exists (
 
 **4.3 Every policy is also filtered by `company_id = public.current_company_id()`**, including the ones above that read as role-based. Role and tenancy are independent checks; an admin is an admin of one company only.
 
+### 4.2.1 Amendments from implementation (Phase 1)
+
+Recorded because §11 requires conflicts to amend the spec rather than be coded around.
+
+- **`profiles` SELECT is `company_id = current_company_id() OR id = auth.uid()`**, not the bare "own company" in the matrix. A limbo user's `current_company_id()` is NULL, so a pure tenancy filter would hide their own row and make §8.3's limbo state undetectable by the very middleware that must route on it. The `OR` is PK equality, so it exposes exactly one extra row: the caller's own. Not a tenancy widening.
+- **§4.2's "self (name) / admin (role, status)" split is a column concern, and a row policy cannot express it.** Enforced as column-level `GRANT UPDATE (full_name, role, status)` plus a trigger. This is the same problem §7.2's note-only path hits on `time_entries`; the GRANT + trigger pairing is the working precedent to reuse there.
+- **An admin may not rename a member.** The matrix reads "self (name)", enforced literally — a name belongs to the person it names. If admins should be able to correct a member's name, that is an additive spec change, not an implementation detail.
+- **The last-admin guard covers UPDATE only, not DELETE.** Deleting an `auth.users` row cascades to `profiles` and would strand a company with zero admins. §2.3 rules deletion out of the product so no application path reaches it, but the cascade exists at the database level. Known gap, deliberately not closed — closing it changes `auth.users` deletion behavior.
+- **The `companies` INSERT policy permits an orphan the application must never create.** A limbo user can insert a company directly and then remain in limbo, unable even to `SELECT` the row they just created. §8.2's `SECURITY DEFINER` function exists precisely to prevent that; the policy is the floor, the function is the only sanctioned path.
+- **`companies.timezone` is validated by trigger, not `CHECK`** — a CHECK constraint cannot subquery `pg_timezone_names`. This matters because §6.1 evaluates `started_at AT TIME ZONE timezone` in every report, so an invalid value would break reporting rather than fail at write time.
+- **`profiles.full_name` cannot be guaranteed meaningful by the database.** The signup trigger falls back through user metadata → email local-part → a placeholder, because an OAuth or magic-link signup carrying no name would otherwise hit NOT NULL and lock the user out entirely. The application must still collect a real name; the database guarantees only non-blank.
+
 ### 4.4 No service-role key in the application — RULED
 
 Anything requiring elevated privileges runs as a `SECURITY DEFINER` Postgres function with a narrow signature. Handing the service key to a Next.js server action means one forgotten `company_id` filter leaks every tenant.
@@ -440,6 +452,8 @@ Path B — invitee:   receives link → sign up or sign in → profile bound to 
 ---
 
 ## 9. Reporting
+
+**9.0 Policy performance note (from Phase 1).** Phase 1's policies call `public.current_company_id()` directly, which Postgres evaluates per row. Wrapping it as `(select public.current_company_id())` lets the planner hoist it to an InitPlan and evaluate it once per statement. Negligible on `companies` and `profiles`; adopt the subselect form from `time_entries` onward, where row counts make it matter.
 
 **9.1 [R] Reports are aggregate SQL run through `lib/actions/**`.** No materialized views, no client-side aggregation of raw entries, no nightly rollup jobs in v1. At the scale of one company's timesheets, a properly indexed `GROUP BY` is correct and stays correct.
 
