@@ -235,6 +235,14 @@ Index: `(company_id, status, created_at DESC)` — drives the admin queue.
 
 Unique: `(company_id, email) WHERE accepted_at IS NULL`.
 
+### 3.6.2 Amendments from implementation (Phase 4)
+
+- **`company_id` on `tasks` and `project_members` is derived, never accepted from a client** — a trigger sets it from the row's `project_id` on every insert/update, and neither role has an INSERT/UPDATE grant on the column at all. This is stronger than §2.1's "trigger-enforced consistency check": a mismatched value isn't validated and rejected, it's structurally impossible to submit. Backed independently by composite FKs (`tasks(project_id, company_id) -> projects(id, company_id)`, and the equivalent on `project_members`), so the guarantee survives even if the trigger were ever dropped.
+- **Hard-delete prevention (§3.11) is a missing grant, not a guard trigger.** §4.2 already lists DELETE as `none` for `clients`/`projects`/`tasks`; the verb simply isn't granted to `authenticated`, so there's no trigger to bypass or forget. `ON DELETE RESTRICT` on the relevant FKs backs it for any higher-privileged path.
+- **§3.6.1's two questions stay genuinely separate.** `projects` SELECT (visibility: admin sees all, employee sees only member projects) is built. Nothing in this migration decides "may log time to this project" — that is `time_entries` INSERT in Phase 5, and it must consult `project_members` directly rather than an `is_admin()` shortcut, or an admin with no membership row silently gets to log time despite §3.6.1 saying assignment governs entry regardless of role.
+- **Inactive members are not filtered by these policies, and this is inherited from Phase 1, not introduced here.** `current_company_id()` doesn't check `profiles.status`; only `is_admin()` does. A deactivated employee with a live session still reads their company's clients and their assigned projects/tasks — losing admin verbs on deactivation works, losing all access does not. Closing this changes `current_company_id()`'s semantics for every table that calls it, not just this phase's four — flagged rather than fixed here.
+- **`project_members` SELECT is company-wide, read literally from §4.2's "own company."** An employee can see the `(project_id, user_id)` assignment pairs for projects whose names they can't read (`projects` SELECT still blocks those). Not a deviation — this is what the matrix says — but worth naming since it wasn't obviously intended.
+
 ### 3.11 [R] Soft delete for structure, hard delete for nothing
 
 `clients`, `projects`, `tasks` archive via `archived_at`. Archived rows stay selectable so historical entries keep a readable label; they're excluded from pickers. A client with projects, or a task with entries, can never be hard-deleted.

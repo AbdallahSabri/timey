@@ -34,6 +34,35 @@ export type Database = {
   };
   public: {
     Tables: {
+      clients: {
+        Row: {
+          archived_at: string | null;
+          company_id: string;
+          id: string;
+          name: string;
+        };
+        Insert: {
+          archived_at?: string | null;
+          company_id?: string;
+          id?: string;
+          name: string;
+        };
+        Update: {
+          archived_at?: string | null;
+          company_id?: string;
+          id?: string;
+          name?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "clients_company_id_fkey";
+            columns: ["company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       companies: {
         Row: {
           created_at: string;
@@ -144,6 +173,116 @@ export type Database = {
           },
         ];
       };
+      project_members: {
+        Row: {
+          added_at: string;
+          company_id: string;
+          project_id: string;
+          user_id: string;
+        };
+        Insert: {
+          added_at?: string;
+          company_id?: string;
+          project_id: string;
+          user_id: string;
+        };
+        Update: {
+          added_at?: string;
+          company_id?: string;
+          project_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "project_members_project_id_company_id_fkey";
+            columns: ["project_id", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id", "company_id"];
+          },
+          {
+            foreignKeyName: "project_members_user_id_company_id_fkey";
+            columns: ["user_id", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id", "company_id"];
+          },
+        ];
+      };
+      projects: {
+        Row: {
+          archived_at: string | null;
+          client_id: string | null;
+          company_id: string;
+          description: string | null;
+          id: string;
+          name: string;
+        };
+        Insert: {
+          archived_at?: string | null;
+          client_id?: string | null;
+          company_id?: string;
+          description?: string | null;
+          id?: string;
+          name: string;
+        };
+        Update: {
+          archived_at?: string | null;
+          client_id?: string | null;
+          company_id?: string;
+          description?: string | null;
+          id?: string;
+          name?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "projects_client_id_company_id_fkey";
+            columns: ["client_id", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id", "company_id"];
+          },
+          {
+            foreignKeyName: "projects_company_id_fkey";
+            columns: ["company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      tasks: {
+        Row: {
+          archived_at: string | null;
+          company_id: string;
+          id: string;
+          name: string;
+          project_id: string;
+        };
+        Insert: {
+          archived_at?: string | null;
+          company_id?: string;
+          id?: string;
+          name: string;
+          project_id: string;
+        };
+        Update: {
+          archived_at?: string | null;
+          company_id?: string;
+          id?: string;
+          name?: string;
+          project_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tasks_project_id_company_id_fkey";
+            columns: ["project_id", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id", "company_id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -173,6 +312,7 @@ export type Database = {
         }[];
       };
       is_admin: { Args: never; Returns: boolean };
+      is_project_member: { Args: { p_project_id: string }; Returns: boolean };
     };
     Enums: {
       member_status: "active" | "inactive";

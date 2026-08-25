@@ -8,9 +8,16 @@ import { SignOutButton } from "@/components/auth/sign-out-button";
  * account may reach is decided by middleware and RLS, not by what is rendered.
  * `/members` is listed for everyone because everyone may read the member list
  * (§4.2); only the controls on that page are admin-gated, and by the database.
+ *
+ * `/projects` and `/clients` are listed for everyone for the same reason, and
+ * they answer differently per account rather than being hidden: `listProjects()`
+ * returns only assigned projects to an employee (§3.6.1) and clients are
+ * company-wide readable (§4.2). Omitting a link would not protect either one.
  */
 const NAV_LINKS = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/projects", label: "Projects" },
+  { href: "/clients", label: "Clients" },
   { href: "/members", label: "Team" },
 ];
 

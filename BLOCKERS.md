@@ -8,6 +8,12 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Open — decisions owed
 
+### B-4 · Should project names be unique per company? — non-blocking
+
+**`SPEC.md` §3.4.** §3.3 (`clients`) and §3.5 (`tasks`) both specify a case-insensitive unique index scoped to active rows; §3.4 (`projects`) specifies none, and Phase 4 built exactly that — confirmed in verification, creating two projects named "Website Rebuild" in the same company succeeds. Likely an oversight rather than a deliberate asymmetry, but the spec is unambiguous as written, so implementation followed it rather than guessing.
+
+**Default if unanswered:** leave as-is — no uniqueness constraint on `projects.name`. Adding one later is a straightforward additive migration (`clients_write_error_message`-style branching in `src/lib/actions/projects.ts` already anticipates the constraint's error text, so the code change is near-zero once the index exists).
+
 ### B-3 · `correction_grace_minutes` — blocks Phase 7
 
 **`SPEC.md` §10 item 1, §7.1.1.**
@@ -84,6 +90,12 @@ Not blocking Phase 3 — the flow is complete and verifiable without it. It beco
 ### N-5 · Local database carries throwaway accounts from Phase 1 and 2 verification
 
 Several `@example.test`/`@example.com` accounts and companies exist in the local stack from adversarial testing, including a few limbo profiles. Harmless — `pnpm exec supabase db reset` clears them via the migrations — but Phase 3's two-accounts-one-company manual verification (§12.2) may want a clean slate first.
+
+### N-7 · Deactivated members keep read access (Phase 4, inherited from Phase 1)
+
+`current_company_id()` (Phase 1) doesn't check `profiles.status`; only `is_admin()` does. A deactivated employee with a live session still reads their company's clients, and their assigned projects/tasks, until that session ends. Losing admin verbs on deactivation works correctly; losing all access does not.
+
+Not blocking — §2.3 asks for loss of access on deactivation, and a live session outliving a deactivation is a narrow, session-lifetime window, not a standing hole. Closing it changes `current_company_id()`'s semantics for every table that calls it (all of them), so it's a deliberate cross-cutting change, not a one-table fix. Worth doing before real users depend on prompt deactivation — flag for a dedicated pass rather than folding into whichever phase happens to touch `profiles` next.
 
 ### N-1 · Node version below the declared engine floor
 
