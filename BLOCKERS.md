@@ -24,6 +24,10 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-5 · N-10 closed — orphaned running timer now closeable, 2026-08-25
+
+**`SPEC.md` §2.3, §5.1, §7.4.1.** `admin_edit_entry` (migration `0009_orphaned_running_entries.sql`) now permits closing a running entry in exactly one case: its owner is currently inactive. An active employee's running timer remains completely untouchable by any admin, exactly as Phase 7 established — the fix adds a live owner-status check to the existing refusal rather than loosening it. The exception permits only `ended_at`/`note`; reattributing `project_id`/`task_id`/`started_at` on a still-running row stays refused even for a deactivated owner's entry — full editing is available immediately after closing, through the ordinary closed-entry path. Verified: the pre-fix repro reproduced the dead end live, then confirmed closed; every path that must still fail (active owner, non-admin, cross-tenant, the deactivated owner themself) does.
+
 ### D-4 · N-7 closed — deactivated members lose all access, 2026-08-25
 
 **`SPEC.md` §2.3, §4.1.1.** `current_company_id()` (migration `0008_deactivation_scope.sql`) now filters on `status = 'active'`, matching `is_admin()`'s existing check. Since every RLS policy in the schema keys off this one function, a single body-only change closed read and write access to all ten tenant tables at once — verified per table, including the specific Phase 5 finding (new timer starts) that first escalated this. Reactivation restores access immediately, same session, no re-login (the function reads live, nothing is cached in a claim). One new gap surfaced while closing this one — see N-10.
@@ -68,16 +72,6 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 
 ## Known, not blocking
 
-### N-10 · A running timer becomes unstoppable if its owner is deactivated mid-shift (found closing N-7)
-
-**`SPEC.md` §2.3, §5.1, §7.4.1.** Proven with an isolated repro, not reasoned: deactivate a user while their timer is running, and *every* closing path refuses. The owner is blocked by N-7's own fix (`current_company_id()` now NULL for them). An admin's `stop_timer()`/raw `UPDATE`/`DELETE` all silently no-op — `time_entries` has no admin-write policy at all, by design (corrections are the only admin path). `admin_edit_entry()` explicitly refuses a *running* entry (Phase 7's deliberate guard, added after review). Neither the owner nor an admin can file a correction against it either — the owner is locked out entirely, and `correction_requests` INSERT requires `requested_by = auth.uid()` on the requester's own entry, which an admin's account never satisfies for someone else's row.
-
-The one working exception: a correction filed **before** deactivation can still be approved afterward (`approve_correction` doesn't check the requester's current status) — so the dead end is specifically *running timer + no pre-filed request + deactivation*.
-
-Admins can still **see** the stuck entry (`report_summary.running_count` includes it), so it surfaces as something visible in the exception queue that nothing can act on — worse than silent, since it looks fixable and isn't.
-
-**Default if unanswered:** the one confirmed working escape is reactivate → owner stops their own timer normally → deactivate again. A real workaround, not a fix. Closing it properly is a human call between two options, both of which are deliberate departures from decisions already made on record: weakening Phase 7's running-entry refusal on `admin_edit_entry` (added after explicit review, and §5.1's "never mutate a running timer" carries no role exception in its wording), or adding a new, currently-unspecified admin capability to close or discard someone else's running entry. Closest existing shape to extend is N-8's `admin_apply_entry_change()` proposal.
-
 ### N-9 · §5.4's "submit a correction with the real end time" has no UI entry point yet (Phase 5/7)
 
 **`SPEC.md` §5.4, §7.4.1.** The database fully supports this: `approve_correction` explicitly allows an amend proposing only `proposed_ended_at` against a **running** entry, closing it at the corrected time (verified end to end in Phase 7). But the correction-submission UI only offers its affordance on **closed** entries — my own scoping instruction for the Phase 7 UI pass restricted it that way, before this specific running-entry case was fully worked through. The stale-timer prompt (Phase 5) honestly says a correction "can't be done from here yet" rather than offering a broken link, so nothing is misleading — but §5.4's second option is currently unreachable through the product.
@@ -116,10 +110,6 @@ Two consequences worth stating rather than discovering:
 - **The channel is now the admin's problem.** A token pasted into a shared Slack channel is a bearer credential for one specific address; the §8.4.1 email match is what keeps it from being a bearer credential for *anyone*.
 
 Not blocking Phase 3 — the flow is complete and verifiable without it. It becomes blocking for anything resembling real use, and it needs a provider decision plus a server-side send, which is `implement-logic` territory rather than a UI change.
-
-### N-5 · Local database carries throwaway accounts from Phase 1 and 2 verification
-
-Several `@example.test`/`@example.com` accounts and companies exist in the local stack from adversarial testing, including a few limbo profiles. Harmless — `pnpm exec supabase db reset` clears them via the migrations — but Phase 3's two-accounts-one-company manual verification (§12.2) may want a clean slate first.
 
 ### N-1 · Node version below the declared engine floor
 
