@@ -260,7 +260,8 @@ A policy on `profiles` that reads `profiles` to determine the caller's company r
 ```sql
 create function public.current_company_id() returns uuid
   language sql stable security definer set search_path = public as
-$$ select company_id from public.profiles where id = auth.uid() $$;
+$$ select company_id from public.profiles
+   where id = auth.uid() and status = 'active' $$;
 
 create function public.is_admin() returns boolean
   language sql stable security definer set search_path = public as
@@ -271,6 +272,8 @@ $$ select exists (
 ```
 
 `set search_path` is mandatory on both — a `SECURITY DEFINER` function without it is a privilege-escalation vector.
+
+**4.1.1 `current_company_id()` filters on `status = 'active'`, added post-Phase-8 (`0008_deactivation_scope.sql`).** Every tenancy check in this schema is `company_id = current_company_id()`, so this single filter is what makes §2.3's "loses access" real rather than aspirational — without it, a deactivated user's still-valid session kept full read *and write* access everywhere their `company_id` matched, confirmed reachable including starting new timers. `is_admin()` already carried the equivalent check from Phase 1; this closed the same gap in the more heavily-relied-on helper. Body-only change, no policy touched — every table's enforcement updated from this one function.
 
 ### 4.2 Policy matrix
 

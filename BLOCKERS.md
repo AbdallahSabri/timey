@@ -24,6 +24,10 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-4 · N-7 closed — deactivated members lose all access, 2026-08-25
+
+**`SPEC.md` §2.3, §4.1.1.** `current_company_id()` (migration `0008_deactivation_scope.sql`) now filters on `status = 'active'`, matching `is_admin()`'s existing check. Since every RLS policy in the schema keys off this one function, a single body-only change closed read and write access to all ten tenant tables at once — verified per table, including the specific Phase 5 finding (new timer starts) that first escalated this. Reactivation restores access immediately, same session, no re-login (the function reads live, nothing is cached in a claim). One new gap surfaced while closing this one — see N-10.
+
 ### D-3 · `correction_grace_minutes` — proceeded on default, 2026-08-25
 
 **`SPEC.md` §10 item 1, §7.1.1.** Unanswered through Phase 7; proceeded on the stated default — strict zero-tolerance, no grace window. Every closed-entry edit routes through a correction request or `admin_edit_entry`, with no exception for a fix made minutes after stopping. Adding a grace window later is additive (a `companies` column plus a branch in the entry-edit path); the corrections machinery it would sit alongside is already built and doesn't need to change shape to accommodate it.
@@ -63,6 +67,16 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 ---
 
 ## Known, not blocking
+
+### N-10 · A running timer becomes unstoppable if its owner is deactivated mid-shift (found closing N-7)
+
+**`SPEC.md` §2.3, §5.1, §7.4.1.** Proven with an isolated repro, not reasoned: deactivate a user while their timer is running, and *every* closing path refuses. The owner is blocked by N-7's own fix (`current_company_id()` now NULL for them). An admin's `stop_timer()`/raw `UPDATE`/`DELETE` all silently no-op — `time_entries` has no admin-write policy at all, by design (corrections are the only admin path). `admin_edit_entry()` explicitly refuses a *running* entry (Phase 7's deliberate guard, added after review). Neither the owner nor an admin can file a correction against it either — the owner is locked out entirely, and `correction_requests` INSERT requires `requested_by = auth.uid()` on the requester's own entry, which an admin's account never satisfies for someone else's row.
+
+The one working exception: a correction filed **before** deactivation can still be approved afterward (`approve_correction` doesn't check the requester's current status) — so the dead end is specifically *running timer + no pre-filed request + deactivation*.
+
+Admins can still **see** the stuck entry (`report_summary.running_count` includes it), so it surfaces as something visible in the exception queue that nothing can act on — worse than silent, since it looks fixable and isn't.
+
+**Default if unanswered:** the one confirmed working escape is reactivate → owner stops their own timer normally → deactivate again. A real workaround, not a fix. Closing it properly is a human call between two options, both of which are deliberate departures from decisions already made on record: weakening Phase 7's running-entry refusal on `admin_edit_entry` (added after explicit review, and §5.1's "never mutate a running timer" carries no role exception in its wording), or adding a new, currently-unspecified admin capability to close or discard someone else's running entry. Closest existing shape to extend is N-8's `admin_apply_entry_change()` proposal.
 
 ### N-9 · §5.4's "submit a correction with the real end time" has no UI entry point yet (Phase 5/7)
 
@@ -106,12 +120,6 @@ Not blocking Phase 3 — the flow is complete and verifiable without it. It beco
 ### N-5 · Local database carries throwaway accounts from Phase 1 and 2 verification
 
 Several `@example.test`/`@example.com` accounts and companies exist in the local stack from adversarial testing, including a few limbo profiles. Harmless — `pnpm exec supabase db reset` clears them via the migrations — but Phase 3's two-accounts-one-company manual verification (§12.2) may want a clean slate first.
-
-### N-7 · Deactivated members keep read access — and, as of Phase 5, write access (Phase 4/5, inherited from Phase 1)
-
-`current_company_id()` (Phase 1) doesn't check `profiles.status`; only `is_admin()` does. A deactivated employee with a live session still reads their company's clients and their assigned projects/tasks — and, confirmed in Phase 5, can still **start new timers and log new time entries**, since `time_entries` INSERT checks `is_project_member()`, not status either. Losing admin verbs on deactivation works correctly; losing all access does not.
-
-**Escalated from non-blocking.** "Keeps reading the client list" is a narrow, session-lifetime gap. "Keeps logging billable-looking hours after being removed" is a sharper failure — deactivation is supposed to be the mechanism that stops someone's time from counting, and right now it doesn't stop new entries, only future logins. Closing it changes `current_company_id()`'s semantics for every table that calls it (all of them), so it's a deliberate cross-cutting change, not a one-table fix — but it should happen as its own pass before Phase 7 (corrections) or Phase 8 (reporting) ship, not be deferred indefinitely. Worth doing next, or at latest before real users depend on prompt deactivation.
 
 ### N-1 · Node version below the declared engine floor
 
