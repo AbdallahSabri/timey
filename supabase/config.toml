@@ -243,6 +243,14 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Points the "confirm signup" email at this app's own /auth/confirm route
+# (BLOCKERS.md N-3) instead of Supabase's hosted verify endpoint, whose
+# default template lands the session as a URL fragment no server here can
+# read.
+[auth.email.template.confirmation]
+subject = "Confirm your email for Timey"
+content_path = "./supabase/templates/confirmation.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

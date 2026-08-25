@@ -24,6 +24,10 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-8 · N-3 closed — email-confirmation callback route built and walked end to end, 2026-08-25
+
+**`SPEC.md` §8.3, §8.3.2.** `GET /auth/confirm` (`src/app/auth/confirm/route.ts`) exchanges the emailed link's `token_hash` for a session via `verifyOtp()`, then redirects to `next` (validated through `safeNextPath`, default `/dashboard`) or, on any failure, to `/sign-in?error=confirmation_failed` — which now renders a plain-language explanation instead of a silent bounce. Added to middleware's public paths, since its visitor is signed out by definition until the route itself creates a session. `supabase/templates/confirmation.html` + a new `[auth.email.template.confirmation]` block in `config.toml` override Supabase's default "Confirm signup" email to link here instead of its own hosted verify endpoint. Verified for real, not just typechecked: flipped `enable_confirmations = true` locally, signed up through the actual Auth API, pulled the real email out of Mailpit, followed its link, confirmed the session cookie landed and a limbo user reached `/onboarding` through ordinary middleware routing, exercised the invalid-token path too, then flipped the setting back off and deleted the test user — local dev's default (confirmations off) is unchanged.
+
 ### D-7 · N-9 closed — running-timer correction now reachable from the stale prompt, 2026-08-25
 
 **`SPEC.md` §5.4, §5.4.1, §7.4.1.** `StaleTimerPrompt` (`src/components/time-entries/stale-timer-prompt.tsx`) now offers "Request a correction instead" alongside "Stop it now" / "It's still running", switching the dialog body in place to a new `CorrectRunningEndTimeForm` (`src/components/corrections/correct-running-end-time-form.tsx`). No backend work was needed — `approve_correction`'s running-entry exception (added while closing N-10) already handled this case correctly; the gap was purely the missing UI entry point. The new form is deliberately narrower than `AmendCorrectionForm`: it proposes only `proposedEndedAt`, since `running_entry_reattribution` refuses project/task/start-time changes on a running row and a wider form would collect input the server is guaranteed to reject. Filing the correction dismisses the prompt for the page load, same as "It's still running" — the timer keeps running until an admin approves it. Verified via the full gate (typecheck/lint/format/test/build, all green); live browser click-through was not possible this session (Chrome extension unavailable), so the flow has been read through carefully but not clicked through end to end — worth a real walkthrough next time the app is open in a connected browser.
@@ -79,12 +83,6 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 ---
 
 ## Known, not blocking
-
-### N-3 · No email-confirmation callback route (Phase 2)
-
-`signUp` already handles the case where Supabase returns no session (confirmations on) by returning `confirmationRequired: true`, and the UI shows a "check your email" state — but there is no `/auth/confirm` route to exchange the email link's `token_hash` for a session. `enable_confirmations = false` locally, so this path has never actually run.
-
-Not blocking today because local dev has confirmations off. It becomes blocking the moment a hosted Supabase project (which defaults confirmations on) is targeted, or naturally lands as part of Phase 3's invitation-acceptance work, which needs the same token-exchange machinery. Whoever picks it up should flip `enable_confirmations = true` locally once and walk the flow for real before shipping it — it has never been exercised, only typechecked.
 
 ### N-4 · Repeated inline `profiles` + `companies` reads — closed in Phase 3
 

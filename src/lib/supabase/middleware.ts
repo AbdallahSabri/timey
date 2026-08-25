@@ -3,8 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import type { Database } from "@/types/supabase";
 
-/** Reachable in any auth state — the marketing root and the health probe. */
-const PUBLIC_PATHS = new Set(["/", "/api/health"]);
+/**
+ * Reachable in any auth state — the marketing root, the health probe, and
+ * (`BLOCKERS.md` N-3) the email-confirmation callback: its visitor has no
+ * session yet by definition, and `verifyOtp()` is what creates one, inside
+ * the route itself.
+ */
+const PUBLIC_PATHS = new Set(["/", "/api/health", "/auth/confirm"]);
 
 /** Destinations for a signed-out visitor only. */
 const AUTH_ONLY_PATHS = new Set(["/sign-in", "/sign-up"]);

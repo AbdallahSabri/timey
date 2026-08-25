@@ -24,13 +24,30 @@ export const metadata: Metadata = {
  * validated at the point of navigation (`safeNextPath`), not here — carrying
  * it through a link is harmless; navigating to it is what needs the check.
  */
+/**
+ * `error=confirmation_failed` arrives from `/auth/confirm` (`BLOCKERS.md`
+ * N-3) when a signup confirmation link's token was invalid, expired, or
+ * already used — the one failure that route can reach on a page it does not
+ * own. Shown once, from the URL; there is nothing to clear it beyond
+ * navigating away.
+ */
+const SEARCH_PARAM_ERRORS: Record<string, string> = {
+  confirmation_failed:
+    "That confirmation link is invalid or has expired. Sign in, or sign up again to get a new one.",
+};
+
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string | string[] }>;
+  searchParams: Promise<{
+    next?: string | string[];
+    error?: string | string[];
+  }>;
 }) {
-  const { next } = await searchParams;
+  const { next, error } = await searchParams;
   const destination = Array.isArray(next) ? next[0] : next;
+  const errorCode = Array.isArray(error) ? error[0] : error;
+  const errorMessage = errorCode ? SEARCH_PARAM_ERRORS[errorCode] : undefined;
 
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-4 py-12">
@@ -42,6 +59,9 @@ export default async function SignInPage({
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {errorMessage ? (
+            <p className="text-destructive mb-4 text-sm">{errorMessage}</p>
+          ) : null}
           <SignInForm next={destination} />
         </CardContent>
         <CardFooter>
