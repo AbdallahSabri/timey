@@ -9,6 +9,21 @@ const PUBLIC_PATHS = new Set(["/", "/api/health"]);
 /** Destinations for a signed-out visitor only. */
 const AUTH_ONLY_PATHS = new Set(["/sign-in", "/sign-up"]);
 
+/**
+ * §8.1 Path B, §8.4. The one prefix rule here, because the route is
+ * `/invite/[token]` — everything else stays exact-match.
+ *
+ * Reachable in **every** auth state, including the one the guard below would
+ * otherwise bounce: a user who already belongs to a company. §8.4 requires
+ * that user to be told plainly that they cannot accept, and only
+ * `accept_invitation()` can say so (23505) — which means the attempt has to be
+ * reachable. Redirecting them to `/dashboard` would turn a specific,
+ * explicable refusal into a silent bounce. A signed-out visitor needs the page
+ * to see which company invited them before signing up; a limbo user needs it
+ * to accept.
+ */
+const INVITE_PATH_PREFIX = "/invite/";
+
 const ONBOARDING_PATH = "/onboarding";
 const DASHBOARD_PATH = "/dashboard";
 const SIGN_IN_PATH = "/sign-in";
@@ -81,7 +96,7 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  if (PUBLIC_PATHS.has(pathname)) {
+  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith(INVITE_PATH_PREFIX)) {
     return supabaseResponse;
   }
 

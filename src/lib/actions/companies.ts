@@ -10,11 +10,43 @@ import {
   createCompanySchema,
   type CreateCompanyInput,
 } from "@/lib/validations/auth";
+import {
+  setMemberStatusSchema,
+  updateMemberRoleSchema,
+  type MemberRole,
+  type MemberStatus,
+} from "@/lib/validations/members";
 
 import type { PostgrestError } from "@supabase/supabase-js";
 
 const NOT_CONFIGURED =
   "Authentication is not configured. Check the Supabase environment variables.";
+
+/**
+ * Who is signed in, what they may do, and where. One read, because the
+ * dashboard, the members page, and every admin-gated view ask the same
+ * question and a copy of this query in each of them drifts (`BLOCKERS.md`
+ * N-4).
+ *
+ * `company` is null for a limbo user (§8.3) — the state between signup and
+ * company creation or invitation acceptance, and the only valid null on
+ * `profiles.company_id`.
+ */
+export type CurrentMember = {
+  id: string;
+  fullName: string;
+  role: MemberRole;
+  status: MemberStatus;
+  company: { id: string; name: string; timezone: string } | null;
+};
+
+/** One row of the admin members list. */
+export type CompanyMember = {
+  id: string;
+  fullName: string;
+  role: MemberRole;
+  status: MemberStatus;
+};
 
 function createCompanyErrorMessage(error: PostgrestError): string {
   switch (error.code) {
@@ -96,4 +128,219 @@ export async function createCompany(
   // rendered under the old state.
   revalidatePath("/", "layout");
   return { ok: true, data: { companyId } };
+}
+
+/**
+ * `null` data means "nobody is signed in" — not an error, so a Server
+ * Component can call this defensively without a try/catch of its own.
+ * Middleware (§8.3) already guarantees a session on authenticated routes;
+ * this is the belt to that pair of braces, not a second gate.
+ *
+ * RLS scopes the read to the caller's own row regardless of what is asked
+ * for, and `profiles_select_own_company` covers the limbo case by PK
+ * (§4.2.1).
+ */
+export async function getCurrentMember(): Promise<
+  ActionResult<CurrentMember | null>
+> {
+  try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { ok: true, data: null };
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, role, status, companies (id, name, timezone)")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      return { ok: false, error: "Could not load your account." };
+    }
+    if (!data) {
+      // Authenticated with no profile row: a signup whose trigger has not
+      // landed yet. Reported as absent rather than fabricated, so the caller
+      // shows the same "not ready" state it would for a signed-out visitor.
+      return { ok: true, data: null };
+    }
+
+    return {
+      ok: true,
+      data: {
+        id: data.id,
+        fullName: data.full_name,
+        role: data.role,
+        status: data.status,
+        company: data.companies
+          ? {
+              id: data.companies.id,
+              name: data.companies.name,
+              timezone: data.companies.timezone,
+            }
+          : null,
+      },
+    };
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+}
+
+function memberUpdateErrorMessage(
+  error: PostgrestError,
+  subject: "role" | "status",
+): string {
+  switch (error.code) {
+    case "42501":
+      // profiles_guard_columns(): not an active admin of this company, or an
+      // admin trying to change their own role (§2 — "except themselves").
+      return `You don't have permission to change this member's ${subject}.`;
+    case "23514":
+      // profiles_enforce_last_admin(). The guard's other 23514s cover id,
+      // created_at and company_id, none of which this update touches, so the
+      // message check is a safety net rather than a real branch.
+      return error.message.includes("at least one active admin")
+        ? "A company must always have at least one active admin."
+        : `Could not change this member's ${subject}. Please try again.`;
+    default:
+      return `Could not change this member's ${subject}. Please try again.`;
+  }
+}
+
+/**
+ * Everyone in the company, including deactivated members — §2.3 keeps them
+ * for their history, and an admin needs to see them to reactivate one.
+ *
+ * No `company_id` filter and no admin check: `profiles_select_own_company`
+ * already scopes this to the caller's company, and adding a redundant filter
+ * here would invite the reading that tenancy is enforced in TypeScript. An
+ * employee gets the same list — §4.2 makes `profiles` SELECT company-wide, and
+ * who your colleagues are is not privileged information; only the mutations
+ * are admin-gated.
+ */
+export async function listMembers(): Promise<ActionResult<CompanyMember[]>> {
+  try {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, role, status")
+      .order("full_name", { ascending: true });
+
+    if (error) {
+      return { ok: false, error: "Could not load the member list." };
+    }
+
+    return {
+      ok: true,
+      data: data.map((row) => ({
+        id: row.id,
+        fullName: row.full_name,
+        role: row.role,
+        status: row.status,
+      })),
+    };
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+}
+
+/**
+ * Everything this could get wrong is already enforced in Postgres by
+ * `0002_tenancy_core.sql`: `profiles_update_self_or_admin` (row scope), the
+ * column GRANT (`full_name, role, status` only), `profiles_10_guard_columns()`
+ * (admin-only, same-company, never your own role) and
+ * `profiles_20_last_admin()` (§2). This action issues the update and
+ * translates what comes back — it re-implements none of it.
+ *
+ * Zero rows affected is the quiet case worth naming: a non-admin's update
+ * fails the policy's USING clause, which filters rather than raises, so
+ * PostgREST reports success with an empty set. Surfaced as not-found rather
+ * than as a no-op the UI would render as "saved".
+ */
+export async function updateMemberRole(
+  userId: string,
+  role: MemberRole,
+): Promise<ActionResult<null>> {
+  const parsed = updateMemberRoleSchema.safeParse({ userId, role });
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid member details.",
+    };
+  }
+
+  try {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ role: parsed.data.role })
+      .eq("id", parsed.data.userId)
+      .select("id");
+
+    if (error) {
+      return { ok: false, error: memberUpdateErrorMessage(error, "role") };
+    }
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error: "Member not found, or you don't have permission to change them.",
+      };
+    }
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+
+  revalidatePath("/", "layout");
+  return { ok: true, data: null };
+}
+
+/**
+ * §2.3 — deactivation, not deletion. An inactive member loses access and
+ * keeps every time entry they ever recorded; hard-deleting them would orphan
+ * the history reports are built from. Deactivating the last active admin is
+ * rejected by the same guard that rejects demoting them (§2).
+ */
+export async function setMemberStatus(
+  userId: string,
+  status: MemberStatus,
+): Promise<ActionResult<null>> {
+  const parsed = setMemberStatusSchema.safeParse({ userId, status });
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid member details.",
+    };
+  }
+
+  try {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ status: parsed.data.status })
+      .eq("id", parsed.data.userId)
+      .select("id");
+
+    if (error) {
+      return { ok: false, error: memberUpdateErrorMessage(error, "status") };
+    }
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error: "Member not found, or you don't have permission to change them.",
+      };
+    }
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+
+  revalidatePath("/", "layout");
+  return { ok: true, data: null };
 }

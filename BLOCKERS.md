@@ -62,9 +62,24 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 
 Not blocking today because local dev has confirmations off. It becomes blocking the moment a hosted Supabase project (which defaults confirmations on) is targeted, or naturally lands as part of Phase 3's invitation-acceptance work, which needs the same token-exchange machinery. Whoever picks it up should flip `enable_confirmations = true` locally once and walk the flow for real before shipping it — it has never been exercised, only typechecked.
 
-### N-4 · Repeated inline `profiles` + `companies` reads
+### N-4 · Repeated inline `profiles` + `companies` reads — closed in Phase 3
 
-The dashboard queries `profiles`/`companies` directly in a Server Component (an explicitly allowed read-only exception, not a new server action). Phase 3's member list and admin-gating UI will want the same "current member + company + role" read. Worth promoting to a single `getCurrentMember` action in `src/lib/actions/**` before Phase 3, rather than after two or three call sites have copy-pasted the query.
+The dashboard queried `profiles`/`companies` directly in a Server Component (an explicitly allowed read-only exception, not a new server action). Phase 3's member list and admin-gating UI wanted the same "current member + company + role" read.
+
+**Closed:** `getCurrentMember()` exists in `src/lib/actions/companies.ts` and is now the only path — `/dashboard`, `/members`, and `/invite/[token]` all call it, and no page queries `profiles` inline any more.
+
+### N-6 · No email delivery for invitations (Phase 3)
+
+`SPEC.md` §8.4 describes the raw token as appearing "only in the emailed URL", and `PLAN.md` Phase 3 lists invite email as required (§10 item 5). **No email provider is wired up.** Nothing sends anything.
+
+Phase 3 ships the link instead: `createInvitation` returns the raw token once, and `/members` renders `${origin}/invite/{token}` with a copy button and the on-screen caveat *"Share this link directly — email delivery isn't set up yet."* The admin pastes it into whatever channel they already use.
+
+Two consequences worth stating rather than discovering:
+
+- **The link is shown exactly once.** Only the SHA-256 is stored (§8.4), so navigating away from the page loses the raw token permanently — the remedy is revoke + re-invite, and the UI says so.
+- **The channel is now the admin's problem.** A token pasted into a shared Slack channel is a bearer credential for one specific address; the §8.4.1 email match is what keeps it from being a bearer credential for *anyone*.
+
+Not blocking Phase 3 — the flow is complete and verifiable without it. It becomes blocking for anything resembling real use, and it needs a provider decision plus a server-side send, which is `implement-logic` territory rather than a UI change.
 
 ### N-5 · Local database carries throwaway accounts from Phase 1 and 2 verification
 

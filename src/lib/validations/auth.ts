@@ -21,7 +21,14 @@ export const MAX_COMPANY_NAME_LENGTH = 120;
 export const MIN_TIMER_HOURS = 1;
 export const MAX_TIMER_HOURS = 168;
 
-const emailSchema = z
+/**
+ * Exported because every address the product accepts — sign-in, sign-up, and
+ * the invited address in `invitations.email` — must normalise identically.
+ * `citext` makes the database case-insensitive; lowercasing here keeps what we
+ * *send* stable too, so a delete-then-insert re-invite (§8.4) matches the row
+ * it means to replace.
+ */
+export const emailSchema = z
   .string()
   .trim()
   .toLowerCase()

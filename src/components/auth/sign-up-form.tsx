@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { safeNextPath } from "@/components/auth/next-path";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -22,8 +23,16 @@ import {
   type SignUpInput,
 } from "@/lib/validations/auth";
 
-export function SignUpForm() {
+/**
+ * `next` carries an invitee back to `/invite/{token}` after signing up (§8.1
+ * Path B). A brand-new account has no company, and the accept page is the one
+ * authenticated-limbo route middleware lets through — so this is the only way
+ * the invitee reaches it instead of being parked on `/onboarding`, where they
+ * would create a second company rather than join the one that invited them.
+ */
+export function SignUpForm({ next }: { next?: string }) {
   const router = useRouter();
+  const destination = safeNextPath(next, "/onboarding");
   const [confirmationEmail, setConfirmationEmail] = useState<string | null>(
     null,
   );
@@ -51,9 +60,9 @@ export function SignUpForm() {
       return;
     }
 
-    // A brand-new account has no company, so §8.3 puts it in limbo and
-    // onboarding is the only route it can reach.
-    router.replace("/onboarding");
+    // A brand-new account has no company, so §8.3 puts it in limbo: onboarding
+    // and `/invite/` are the only routes it can reach.
+    router.replace(destination);
     router.refresh();
   }
 

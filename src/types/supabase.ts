@@ -61,6 +61,54 @@ export type Database = {
         };
         Relationships: [];
       };
+      invitations: {
+        Row: {
+          accepted_at: string | null;
+          company_id: string;
+          email: string;
+          expires_at: string;
+          id: string;
+          invited_by: string;
+          role: Database["public"]["Enums"]["user_role"];
+          token_hash: string;
+        };
+        Insert: {
+          accepted_at?: string | null;
+          company_id: string;
+          email: string;
+          expires_at?: string;
+          id?: string;
+          invited_by: string;
+          role?: Database["public"]["Enums"]["user_role"];
+          token_hash: string;
+        };
+        Update: {
+          accepted_at?: string | null;
+          company_id?: string;
+          email?: string;
+          expires_at?: string;
+          id?: string;
+          invited_by?: string;
+          role?: Database["public"]["Enums"]["user_role"];
+          token_hash?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "invitations_company_id_fkey";
+            columns: ["company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "invitations_invited_by_fkey";
+            columns: ["invited_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       profiles: {
         Row: {
           company_id: string | null;
@@ -101,6 +149,7 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      accept_invitation: { Args: { p_token: string }; Returns: string };
       create_company: {
         Args: {
           p_max_timer_hours?: number;
@@ -111,6 +160,18 @@ export type Database = {
         Returns: string;
       };
       current_company_id: { Args: never; Returns: string };
+      hash_invitation_token: { Args: { p_token: string }; Returns: string };
+      invitation_preview: {
+        Args: { p_token: string };
+        Returns: {
+          accepted: boolean;
+          company_name: string;
+          email: string;
+          expired: boolean;
+          expires_at: string;
+          role: Database["public"]["Enums"]["user_role"];
+        }[];
+      };
       is_admin: { Args: never; Returns: boolean };
     };
     Enums: {

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { safeNextPath } from "@/components/auth/next-path";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -16,8 +17,15 @@ import { Input } from "@/components/ui/input";
 import { signIn } from "@/lib/actions/auth";
 import { signInSchema, type SignInInput } from "@/lib/validations/auth";
 
-export function SignInForm() {
+/**
+ * `next` carries an invitee back to `/invite/{token}` after signing in (§8.1
+ * Path B) instead of dropping them on the dashboard of a company they have not
+ * joined yet. Absent or unusable, the destination is the previous hardcoded
+ * one — see `safeNextPath` for what "unusable" means.
+ */
+export function SignInForm({ next }: { next?: string }) {
   const router = useRouter();
+  const destination = safeNextPath(next, "/dashboard");
 
   const form = useForm<SignInInput, unknown, SignInInput>({
     resolver: zodResolver(signInSchema),
@@ -38,8 +46,9 @@ export function SignInForm() {
     }
 
     // Middleware owns the destination from here: a user still in limbo (§8.3)
-    // is bounced on to /onboarding without this form knowing or asking.
-    router.replace("/dashboard");
+    // is bounced on to /onboarding without this form knowing or asking —
+    // except on `/invite/`, which middleware lets through in every auth state.
+    router.replace(destination);
     router.refresh();
   }
 
