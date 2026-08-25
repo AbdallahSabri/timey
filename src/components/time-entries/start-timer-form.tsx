@@ -2,11 +2,12 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
-import { nativeSelectClassName } from "@/components/structure/select-class";
+import { ProjectTaskFields } from "@/components/time-entries/project-task-fields";
+import { useProjectTasks } from "@/components/time-entries/use-project-tasks";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -17,8 +18,6 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import type { Project } from "@/lib/actions/projects";
-import type { Task } from "@/lib/actions/tasks";
-import { listTasks } from "@/lib/actions/tasks";
 import { startTimer, switchTimer } from "@/lib/actions/time-entries";
 import { startTimerSchema } from "@/lib/validations/time-entries";
 
@@ -26,28 +25,6 @@ import type { z } from "zod";
 
 type StartTimerInput = z.input<typeof startTimerSchema>;
 type StartTimerValues = z.output<typeof startTimerSchema>;
-
-type TaskState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "ready"; tasks: Task[] }
-  | { status: "error"; message: string };
-
-/**
- * §3.5.2 gives every project a "General" task, so a project is never
- * un-loggable — but "first alphabetically" is not the same as "the obvious
- * one", and silently pre-selecting whichever task sorts first would attribute
- * time to something nobody chose. So: General when it exists, the only task
- * when there is only one, and otherwise an explicit pick.
- */
-function preferredTaskId(tasks: Task[]): string {
-  const general = tasks.find((task) => task.name.toLowerCase() === "general");
-  if (general) {
-    return general.id;
-  }
-
-  return tasks.length === 1 ? (tasks[0]?.id ?? "") : "";
-}
 
 /**
  * The start form, in both the places a timer can begin.
@@ -59,9 +36,11 @@ function preferredTaskId(tasks: Task[]): string {
  * inserts a new one. The copy around this form says so in those words; nothing
  * here should ever read as "change what this timer is tracking".
  *
- * Tasks are fetched per project rather than shipped for every project up front:
- * `listTasks` is scoped by the same policy as the project list, so asking for
- * one project's tasks is one round trip and asking for all of them is N.
+ * The project → task cascade lives in `useProjectTasks` / `ProjectTaskFields`
+ * (Phase 6), shared with the manual-entry form so both ask the question the
+ * same way. **No timestamp field appears here and none may be added:** §5.3
+ * rules that the client never sends one for a timer, and `startTimer`'s payload
+ * has no room for it. Client-supplied times belong to the manual path alone.
  */
 export function StartTimerForm({
   projects,
@@ -73,7 +52,6 @@ export function StartTimerForm({
   onCompleted?: () => void;
 }) {
   const router = useRouter();
-  const [taskState, setTaskState] = useState<TaskState>({ status: "idle" });
 
   const form = useForm<StartTimerInput, unknown, StartTimerValues>({
     resolver: zodResolver(startTimerSchema),
@@ -86,54 +64,12 @@ export function StartTimerForm({
     watch,
   } = form;
 
-  const projectId = watch("projectId");
+  const setTaskId = useCallback(
+    (taskId: string) => setValue("taskId", taskId),
+    [setValue],
+  );
 
-  useEffect(() => {
-    if (!projectId) {
-      setTaskState({ status: "idle" });
-      setValue("taskId", "");
-      return;
-    }
-
-    // A user clicking through the project list faster than the network answers
-    // would otherwise get whichever response landed last, which is not
-    // necessarily the project now selected.
-    let cancelled = false;
-    setTaskState({ status: "loading" });
-    setValue("taskId", "");
-
-    void listTasks(projectId).then((result) => {
-      if (cancelled) {
-        return;
-      }
-      if (!result.ok) {
-        setTaskState({ status: "error", message: result.error });
-        return;
-      }
-
-      setTaskState({ status: "ready", tasks: result.data });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, setValue]);
-
-  /**
-   * Applied in a second effect rather than beside `setTaskState` above, and the
-   * ordering is load-bearing: `setValue` on a registered `<select>` writes
-   * straight to the DOM node, and at the moment the fetch resolves that node
-   * still holds only the placeholder — React has not rendered the new
-   * `<option>`s yet, so the assignment silently does nothing and the field
-   * stays empty. Running after the commit means the option exists to select.
-   */
-  useEffect(() => {
-    if (taskState.status !== "ready") {
-      return;
-    }
-
-    setValue("taskId", preferredTaskId(taskState.tasks));
-  }, [taskState, setValue]);
+  const taskState = useProjectTasks(watch("projectId"), setTaskId);
 
   async function onSubmit(values: StartTimerValues) {
     const result =
@@ -160,69 +96,18 @@ export function StartTimerForm({
     router.refresh();
   }
 
-  const tasks = taskState.status === "ready" ? taskState.tasks : [];
-
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
       <FieldGroup>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-          <Field
-            className="sm:flex-1"
-            data-invalid={errors.projectId ? true : undefined}
-          >
-            <FieldLabel htmlFor={`${mode}-project`}>Project</FieldLabel>
-            <select
-              id={`${mode}-project`}
-              className={nativeSelectClassName}
-              aria-invalid={errors.projectId ? true : undefined}
-              {...form.register("projectId")}
-            >
-              <option value="">Pick a project…</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.client
-                    ? `${project.client.name} — ${project.name}`
-                    : project.name}
-                </option>
-              ))}
-            </select>
-            <FieldError
-              errors={errors.projectId ? [errors.projectId] : undefined}
-            />
-          </Field>
-
-          <Field
-            className="sm:flex-1"
-            data-invalid={errors.taskId ? true : undefined}
-          >
-            <FieldLabel htmlFor={`${mode}-task`}>Task</FieldLabel>
-            <select
-              id={`${mode}-task`}
-              className={nativeSelectClassName}
-              disabled={taskState.status !== "ready"}
-              aria-invalid={errors.taskId ? true : undefined}
-              {...form.register("taskId")}
-            >
-              <option value="">
-                {taskState.status === "loading"
-                  ? "Loading tasks…"
-                  : "Pick a task…"}
-              </option>
-              {tasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.name}
-                </option>
-              ))}
-            </select>
-            {taskState.status === "error" ? (
-              <FieldError errors={[{ message: taskState.message }]} />
-            ) : (
-              <FieldError
-                errors={errors.taskId ? [errors.taskId] : undefined}
-              />
-            )}
-          </Field>
-        </div>
+        <ProjectTaskFields
+          idPrefix={mode}
+          projects={projects}
+          taskState={taskState}
+          projectField={form.register("projectId")}
+          taskField={form.register("taskId")}
+          projectError={errors.projectId}
+          taskError={errors.taskId}
+        />
 
         <Field data-invalid={errors.note ? true : undefined}>
           <FieldLabel htmlFor={`${mode}-note`}>Note</FieldLabel>

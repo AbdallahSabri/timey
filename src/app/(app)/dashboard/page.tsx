@@ -1,5 +1,6 @@
 import { DEFAULT_MAX_TIMER_HOURS } from "@/components/time-entries/elapsed";
 import { EntryList } from "@/components/time-entries/entry-list";
+import { ManualEntryDialog } from "@/components/time-entries/manual-entry-dialog";
 import { RunningTimerCard } from "@/components/time-entries/running-timer-card";
 import { StartTimerForm } from "@/components/time-entries/start-timer-form";
 import {
@@ -113,6 +114,20 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Below the timer and outside a card of its own, because §5.3's two
+          kinds of entry are not two equal choices: the timer measures and this
+          asserts, and the assertion is the fallback. §7.1 allows it only for
+          today, which the dialog says before you type rather than after the
+          server refuses. */}
+      {projects.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-muted-foreground text-sm">
+            Worked without the timer? Add today&rsquo;s time by hand.
+          </p>
+          <ManualEntryDialog projects={projects} timezone={timezone} />
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader>

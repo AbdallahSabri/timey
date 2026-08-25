@@ -5,14 +5,23 @@ import { revalidatePath } from "next/cache";
 // Type-only, so it is erased at build time and does not pull another
 // "use server" module into this one's graph.
 import type { ActionResult } from "@/lib/actions/auth";
+// A value import, and the one place this module reaches into another action
+// file. Phase 6 needs `companies.timezone` for §7.1's today-only rule, and
+// `getCurrentMember()` already answers exactly that — inlining a second
+// `profiles -> companies` read here would be a second copy of a query whose
+// RLS behaviour (§4.2.1's limbo case) is subtle enough to be worth having in
+// one place.
+import { getCurrentMember } from "@/lib/actions/companies";
 import { createClient } from "@/lib/supabase/server";
 import {
   entryNoteSchema,
   listMyEntriesOptionsSchema,
+  manualEntrySchema,
   startTimerSchema,
   timeEntryIdSchema,
   type EntrySource,
   type ListMyEntriesOptions,
+  type ManualEntryInput,
 } from "@/lib/validations/time-entries";
 
 import type { PostgrestError } from "@supabase/supabase-js";
@@ -120,23 +129,36 @@ function toEntryWithLabels(row: EntryRowWithLabels): TimeEntryWithLabels {
 
 /**
  * §5.2 asks for "This overlaps an entry from 14:00–15:30", naming the
- * conflicting range. That is deliberately **not** attempted here, and the
- * omission is scoped rather than permanent:
+ * conflicting range. `describeOverlap` (Phase 6) does exactly that, by querying
+ * for what the insert collided with rather than parsing Postgres's `DETAIL`
+ * prose. This is what remains when that query cannot answer:
  *
- *   * Through a pure timer start/stop this is effectively unreachable —
+ *   * the **timer** paths, where an overlap is effectively unreachable —
  *     `started_at` is `now()` and the exclusion constraint ignores running
- *     rows, so there is no closed range for a new entry to land inside. It
- *     becomes reachable in Phase 6, when a manual entry can be written over a
- *     period that already has one.
- *   * The conflicting range is only available by parsing Postgres's `DETAIL`
- *     text, which is a locale- and version-dependent string, not an API. Phase
- *     6 should name the range with a real query against `tstzrange` overlap
- *     before it inserts, where the answer is data rather than prose.
+ *     rows, so there is no closed range for a new entry to land inside, and the
+ *     stop transition's version has no candidate range to name either;
+ *   * the manual path when the conflicting entry was discarded between the
+ *     failed insert and the lookup, or when the company's timezone is one this
+ *     runtime cannot format.
  *
- * So the honest message for now says what happened without inventing a
- * precision this layer does not have.
+ * It says what happened without inventing a precision it does not have.
  */
 const OVERLAP = "This overlaps another time entry.";
+
+/**
+ * The three refusals every INSERT into `time_entries` shares, hoisted out of
+ * `startTimerErrorMessage` in Phase 6 so the manual path answers a given
+ * SQLSTATE with the same sentence the timer path does. A user who is not on a
+ * project should not learn two different things depending on which button they
+ * pressed.
+ */
+const NOT_A_PROJECT_MEMBER =
+  "You're not assigned to this project. Ask an admin to add you to it before logging time.";
+
+const TASK_NOT_IN_PROJECT =
+  "That task doesn't belong to that project. Reload and pick again.";
+
+const PROJECT_GONE = "That project no longer exists.";
 
 function startTimerErrorMessage(error: PostgrestError): string {
   switch (error.code) {
@@ -162,7 +184,7 @@ function startTimerErrorMessage(error: PostgrestError): string {
       // (company_id, user_id, ...) — this module never sends one — and a limbo
       // caller whose `current_company_id()` is NULL, whom middleware (§8.3)
       // does not let reach a timer at all.
-      return "You're not assigned to this project. Ask an admin to add you to it before logging time.";
+      return NOT_A_PROJECT_MEMBER;
     case "23P01":
       return OVERLAP;
     case "23503":
@@ -170,12 +192,12 @@ function startTimerErrorMessage(error: PostgrestError): string {
       // to a different project (`time_entries_task_id_project_id_fkey`, the
       // pair check 0004 could not make). Both mean the picker is out of date.
       return error.message.includes("task")
-        ? "That task doesn't belong to that project. Reload and pick again."
-        : "That project no longer exists.";
+        ? TASK_NOT_IN_PROJECT
+        : PROJECT_GONE;
     case "23502":
       // `set_company_id_from_project()` raises this when project_id names
       // nothing at all.
-      return "That project no longer exists.";
+      return PROJECT_GONE;
     case "23514":
       // `ended_at <= started_at`. Unreachable from here — this insert never
       // sends either timestamp — so there is nothing specific to say.
@@ -687,4 +709,502 @@ export async function switchTimer(
 
   revalidatePath("/", "layout");
   return { ok: true, data: { stopped, started } };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — manual entries (§5.3, §6.4, §7.1)
+//
+// Everything above this line records a MEASUREMENT: `started_at` and `ended_at`
+// are `now()` in Postgres and no code in this module has ever constructed a
+// timestamp. Everything below records an ASSERTION — the user says when they
+// worked — which is why §5.3 permits client-supplied times here and why the
+// three rules that follow exist at all. The database enforces exactly one of
+// them (`ended_at > started_at`); the other two are ours.
+// ---------------------------------------------------------------------------
+
+/**
+ * Company-timezone arithmetic, done with `Intl` rather than `Date`'s local
+ * methods, because the only zone `Date` knows is the *server's* — and a Next.js
+ * server in UTC deciding what "today" means for a Cairo company is §6.1's
+ * failure mode with a different cause (§6.2: per-user zones are out of scope,
+ * so the company's is the only one that exists).
+ *
+ * `Intl.DateTimeFormat` throws `RangeError` for a zone this runtime's ICU data
+ * does not know. `companies.timezone` is validated against `pg_timezone_names`
+ * by trigger (§4.2.1), so the two catalogues should agree — but "should" is not
+ * a guarantee across a Node upgrade, so every caller of these helpers is inside
+ * a try/catch that reports the mismatch instead of 500-ing the action.
+ */
+const zonedFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function zonedFormatter(timeZone: string): Intl.DateTimeFormat {
+  const cached = zonedFormatters.get(timeZone);
+  if (cached) {
+    return cached;
+  }
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    // h23, not `hour12: false` — under some ICU versions the latter yields the
+    // h24 cycle, which renders midnight as "24" and would put every entry
+    // logged in the first hour of the day on the previous date.
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  zonedFormatters.set(timeZone, formatter);
+  return formatter;
+}
+
+type ZonedParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+function zonedParts(instantMs: number, timeZone: string): ZonedParts {
+  const parts = zonedFormatter(timeZone).formatToParts(instantMs);
+  const read = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value);
+
+  return {
+    year: read("year"),
+    month: read("month"),
+    day: read("day"),
+    hour: read("hour"),
+    minute: read("minute"),
+    second: read("second"),
+  };
+}
+
+const MINUTE_MS = 60_000;
+
+/** `YYYY-MM-DD` — the company-local calendar day an instant falls on (§6.1). */
+function companyLocalDate(instantMs: number, timeZone: string): string {
+  const { year, month, day } = zonedParts(instantMs, timeZone);
+  return [
+    String(year).padStart(4, "0"),
+    String(month).padStart(2, "0"),
+    String(day).padStart(2, "0"),
+  ].join("-");
+}
+
+/** The zone's offset from UTC at a given instant, in milliseconds east. */
+function zonedOffsetMs(instantMs: number, timeZone: string): number {
+  const seconds = Math.floor(instantMs / 1000) * 1000;
+  const { year, month, day, hour, minute, second } = zonedParts(
+    seconds,
+    timeZone,
+  );
+  return Date.UTC(year, month - 1, day, hour, minute, second) - seconds;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * A wall clock in `timeZone` → the instant it names. The inverse of everything
+ * else here, and the one direction `Intl` does not offer, so it is built from
+ * two offset probes.
+ *
+ * Reading the offset *at the wall clock read as UTC* would be the obvious
+ * one-liner and is wrong twice a year: it asks the zone what its offset is at
+ * an instant up to fourteen hours away from the one being resolved, which lands
+ * on the wrong side of a transition for any wall clock within that window of
+ * one. Probing a day either side instead brackets every transition (no zone
+ * shifts twice in 48 hours), then keeps whichever candidate actually reproduces
+ * the wall clock it started from.
+ *
+ * The two DST cases are decided deliberately rather than by accident of
+ * arithmetic. Both were checked against Postgres's own
+ * `timestamp X at time zone Z` on this stack, across America/New_York,
+ * Europe/London, Africa/Cairo, Australia/Lord_Howe (a 30-minute shift),
+ * Pacific/Chatham (+12:45) and Pacific/Kiritimati (+14):
+ *
+ *   * **Nonexistent** (clocks went forward; the wall clock is skipped). Neither
+ *     candidate round-trips, and the pre-transition offset is used, which
+ *     resolves 02:30 to 03:30 — shifted forward by the gap. **Identical to
+ *     Postgres in every case tried.** Rejecting it instead was considered: it
+ *     would be defensible, but "that time does not exist" is a sentence about
+ *     the timezone database, not about the user's day, and one hour a year is
+ *     not worth an error message nobody can act on.
+ *   * **Ambiguous** (clocks went back; the wall clock happens twice). Both
+ *     candidates round-trip and the EARLIER instant is chosen — the first
+ *     occurrence. **This is where the two implementations diverge**, and the
+ *     divergence is chosen rather than discovered: Postgres returned the second
+ *     occurrence for every ambiguous case tried (01:30 EST, not 01:30 EDT).
+ *     Both instants are a truthful reading of the wall clock, and Postgres's
+ *     own documentation declines to specify which one `AT TIME ZONE` picks, so
+ *     matching it would mean depending on unspecified behaviour to stay
+ *     consistent. `Math.min` is fixed, is the same rule ECMAScript's Temporal
+ *     calls `compatible`, and costs at most one DST hour a year on an entry the
+ *     user can see and correct. **Phase 7 must make the same choice** — a
+ *     correction proposal is a wall clock too, and resolving it in SQL rather
+ *     than here would reintroduce exactly this disagreement.
+ *
+ * `local` is the schema's normalised 19-character form, so the slices below are
+ * guaranteed positions, not a second parse (`localDateTimeSchema`).
+ */
+function wallClockToInstant(local: string, timeZone: string): Date {
+  const naiveUtc = Date.UTC(
+    Number(local.slice(0, 4)),
+    Number(local.slice(5, 7)) - 1,
+    Number(local.slice(8, 10)),
+    Number(local.slice(11, 13)),
+    Number(local.slice(14, 16)),
+    Number(local.slice(17, 19)),
+  );
+
+  const before = naiveUtc - zonedOffsetMs(naiveUtc - DAY_MS, timeZone);
+  const after = naiveUtc - zonedOffsetMs(naiveUtc + DAY_MS, timeZone);
+
+  const roundTrips = (candidate: number): boolean => {
+    const parts = zonedParts(candidate, timeZone);
+    return (
+      Date.UTC(
+        parts.year,
+        parts.month - 1,
+        parts.day,
+        parts.hour,
+        parts.minute,
+        parts.second,
+      ) === naiveUtc
+    );
+  };
+
+  const matches = [before, after].filter(roundTrips);
+  if (matches.length > 0) {
+    return new Date(Math.min(...matches));
+  }
+
+  return new Date(before);
+}
+
+/**
+ * §5.2's message, built the only way it can honestly be built: by asking the
+ * database what the insert collided with.
+ *
+ * Postgres reports an exclusion violation as `23P01` with the constraint name
+ * and a `DETAIL` line containing the offending range as prose. That prose is
+ * neither stable nor an API — it is locale- and version-dependent, and it names
+ * the range in the *server's* zone, which is UTC here and therefore not the
+ * range anyone would recognise. So the conflicting entry is looked up instead.
+ *
+ * The predicate is the exclusion constraint's own, restated as a filter:
+ * `tstzrange(a) && tstzrange(b)` on half-open `[)` ranges is exactly
+ * `a.started < b.ended AND a.ended > b.started`, which is why back-to-back
+ * entries touching at one instant are not reported here either — they do not
+ * overlap and the database did not refuse them.
+ *
+ * `user_id` is filtered explicitly for the reason `getRunningTimer` does it: to
+ * an ADMIN the SELECT policy is company-wide, and naming a colleague's hours in
+ * an error message would leak them. The exclusion constraint is per-user, so
+ * anything it refused is the caller's own row by construction.
+ *
+ * Returns `null` — and the caller falls back to the generic sentence — when the
+ * lookup finds nothing (the conflicting entry was discarded between the two
+ * statements) or when the company's zone is one this runtime cannot format.
+ * A wrong time in this message is worse than no time.
+ */
+async function describeOverlap(
+  supabase: ServerClient,
+  userId: string,
+  timeZone: string,
+  startedAt: Date,
+  endedAt: Date,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("time_entries")
+    .select("started_at, ended_at")
+    .eq("user_id", userId)
+    .not("ended_at", "is", null)
+    .lt("started_at", endedAt.toISOString())
+    .gt("ended_at", startedAt.toISOString())
+    .order("started_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data || !data.ended_at) {
+    return null;
+  }
+
+  const conflictStart = Date.parse(data.started_at);
+  const conflictEnd = Date.parse(data.ended_at);
+  if (Number.isNaN(conflictStart) || Number.isNaN(conflictEnd)) {
+    return null;
+  }
+
+  try {
+    return formatConflictRange(conflictStart, conflictEnd, timeZone);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * "14:00–15:30" when the whole conflicting entry sits on today's company-local
+ * date, and "24 Aug, 22:00 – 25 Aug, 03:00" when it does not.
+ *
+ * The second form is not decoration: §5.5 rules that an entry is never split
+ * across days, so a 22:00→03:00 shift is one row, and a manual entry for this
+ * morning can collide with the tail of it. "This overlaps an entry from
+ * 22:00–03:00" would then name a range that is nowhere on the day the user is
+ * looking at.
+ *
+ * The locale is pinned to en-GB and the zone is the company's, matching
+ * `formatStartedAt` in `components/time-entries/format-entry.ts` — the same
+ * entry must not be called 14:00 in the list and 2:00 pm in the error about it.
+ * That module is not imported because it belongs to the UI layer; the shared
+ * thing is the convention, not the function.
+ */
+function formatConflictRange(
+  startMs: number,
+  endMs: number,
+  timeZone: string,
+): string {
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  });
+
+  const today = companyLocalDate(Date.now(), timeZone);
+  const sameDay =
+    companyLocalDate(startMs, timeZone) === today &&
+    companyLocalDate(endMs, timeZone) === today;
+
+  if (sameDay) {
+    return `${time.format(startMs)}–${time.format(endMs)}`;
+  }
+
+  const dayTime = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  });
+
+  return `${dayTime.format(startMs)} – ${dayTime.format(endMs)}`;
+}
+
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+async function manualEntryErrorMessage(
+  supabase: ServerClient,
+  error: PostgrestError,
+  context: {
+    userId: string;
+    timeZone: string;
+    startedAt: Date;
+    endedAt: Date;
+  },
+): Promise<string> {
+  switch (error.code) {
+    case "23P01": {
+      // §5.2, and the case Phase 5 deferred: through the timer alone this is
+      // unreachable (`started_at` is `now()`, so there is no closed range for a
+      // new entry to land inside), which is why naming the range only becomes
+      // worth a second query here.
+      const range = await describeOverlap(
+        supabase,
+        context.userId,
+        context.timeZone,
+        context.startedAt,
+        context.endedAt,
+      );
+      return range ? `This overlaps an entry from ${range}.` : OVERLAP;
+    }
+    case "23514":
+      // `time_entries_ended_after_started`. The action refuses this before the
+      // round trip, so reaching it means the two clocks disagreed about the
+      // ordering — a wall clock resolved across a DST transition is the only
+      // way that happens. Mapped anyway: the CHECK, not this module, is what
+      // makes a reversed entry impossible.
+      return "An entry has to end after it starts.";
+    case "42501":
+      return NOT_A_PROJECT_MEMBER;
+    case "23503":
+      return error.message.includes("task")
+        ? TASK_NOT_IN_PROJECT
+        : PROJECT_GONE;
+    case "23502":
+      return PROJECT_GONE;
+    case "23505":
+      // `time_entries_one_running_per_user` is `WHERE ended_at IS NULL`, and
+      // this payload always carries an `ended_at` — a manual entry is created
+      // closed, in one statement — so it cannot contend with a running timer
+      // here at all. No other unique index exists on this table. Kept as a
+      // branch rather than left to the default only so that a future one does
+      // not arrive as "please try again".
+      return "That entry has already been recorded.";
+    default:
+      return "Could not save that entry. Please try again.";
+  }
+}
+
+/** The only shape a manual insert may take. See `createManualEntry`. */
+type ManualEntryPayload = {
+  project_id: string;
+  task_id: string;
+  started_at: string;
+  ended_at: string;
+  source: "manual";
+  note?: string;
+};
+
+const NO_COMPANY =
+  "You need to finish setting up your company before logging time.";
+
+const UNKNOWN_TIMEZONE =
+  "Your company's timezone isn't one this server recognises. Ask an admin to set it again.";
+
+/**
+ * §7.1: "Create a manual entry dated **today** — Yes." Everything else in that
+ * table's manual-entry rows is a No that routes to a correction request.
+ *
+ * **Three validations, in this order, and the order is deliberate:**
+ *
+ *  1. `ended_at > started_at`. Checked on the resolved INSTANTS, never on the
+ *     submitted wall clocks — see `manualEntrySchema` for why string order is
+ *     not instant order across a DST boundary. The database's CHECK is the real
+ *     enforcement (23514); this exists so the common typo answers immediately
+ *     and specifically instead of round-tripping into a constraint name.
+ *  2. §6.4's future guard, `started_at <= now() + 5 minutes`. **Not enforced by
+ *     the database** — 0005 scoped it out explicitly, because Phase 5 never
+ *     produced a client timestamp to guard. This is the enforcement, not a
+ *     double-check of one. The grace is five minutes exactly, so a user
+ *     rounding "I'm about to start at 10:00" up by three minutes is accepted
+ *     and one dating tomorrow is not.
+ *  3. §7.1's today-only rule, evaluated as
+ *     `companyLocalDate(started) === companyLocalDate(now)` in
+ *     `companies.timezone` — never the server's zone and never the browser's.
+ *
+ * Future before today, because both refuse a timestamp dated tomorrow and
+ * "you cannot log time that has not happened yet" is the more useful of the two
+ * sentences. Yesterday reaches the today check untouched by the future one.
+ *
+ * The refusal for a past date names corrections without linking to them:
+ * §7.1's route exists in the spec and not yet in the product (Phase 7), and a
+ * link to a page that 404s is worse than a sentence that says "not yet".
+ *
+ * **The payload is six keys and can never be more**, for the same reason
+ * `startTimer`'s is four: `company_id`, `user_id`, `created_at`, `updated_at`
+ * and `duration_seconds` carry no INSERT grant, so naming one fails 42501 at
+ * runtime even with the correct value. What differs from the timer is that
+ * `started_at` and `ended_at` ARE sent — as UTC instants resolved here, which is
+ * §5.3's "deliberate assertion" written down.
+ */
+export async function createManualEntry(
+  input: ManualEntryInput,
+): Promise<ActionResult<TimeEntry>> {
+  const parsed = manualEntrySchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Could not save that entry.",
+    };
+  }
+
+  // Not just the timezone: this also answers "who am I" without a second
+  // round trip to the auth server. `profiles.id` IS the auth user id, and the
+  // overlap lookup below needs it because RLS does not scope an admin.
+  const member = await getCurrentMember();
+  if (!member.ok) {
+    return member;
+  }
+  if (!member.data) {
+    return { ok: false, error: NOT_SIGNED_IN };
+  }
+  if (!member.data.company) {
+    return { ok: false, error: NO_COMPANY };
+  }
+
+  const userId = member.data.id;
+  const timeZone = member.data.company.timezone;
+
+  // One reading of the clock for every comparison below. Taking `Date.now()`
+  // twice could put the future check and the day check on opposite sides of
+  // midnight, which is a bug that reproduces once a day for one millisecond.
+  const now = Date.now();
+
+  let startedAt: Date;
+  let endedAt: Date;
+  let today: string;
+  try {
+    startedAt = wallClockToInstant(parsed.data.startedAt, timeZone);
+    endedAt = wallClockToInstant(parsed.data.endedAt, timeZone);
+    today = companyLocalDate(now, timeZone);
+  } catch {
+    return { ok: false, error: UNKNOWN_TIMEZONE };
+  }
+
+  if (endedAt.getTime() <= startedAt.getTime()) {
+    return { ok: false, error: "An entry has to end after it starts." };
+  }
+
+  if (startedAt.getTime() > now + 5 * MINUTE_MS) {
+    return {
+      ok: false,
+      error: "You can't log time that hasn't happened yet.",
+    };
+  }
+
+  if (companyLocalDate(startedAt.getTime(), timeZone) !== today) {
+    return {
+      ok: false,
+      error:
+        "You can only add time for today. Earlier days need a correction request, which isn't built yet.",
+    };
+  }
+
+  const payload: ManualEntryPayload = {
+    project_id: parsed.data.projectId,
+    task_id: parsed.data.taskId,
+    started_at: startedAt.toISOString(),
+    ended_at: endedAt.toISOString(),
+    source: "manual",
+  };
+  if (parsed.data.note !== null) {
+    payload.note = parsed.data.note;
+  }
+
+  let entry: TimeEntry;
+  try {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+      .from("time_entries")
+      .insert(payload)
+      .select(ENTRY_COLUMNS)
+      .single();
+
+    if (error) {
+      return {
+        ok: false,
+        error: await manualEntryErrorMessage(supabase, error, {
+          userId,
+          timeZone,
+          startedAt,
+          endedAt,
+        }),
+      };
+    }
+
+    entry = toEntry(data);
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+
+  revalidatePath("/", "layout");
+  return { ok: true, data: entry };
 }

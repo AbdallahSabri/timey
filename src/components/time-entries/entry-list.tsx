@@ -27,6 +27,11 @@ import type { TimeEntryWithLabels } from "@/lib/actions/time-entries";
  * A label reads "—" when the project or task embed came back null: an employee
  * removed from a project keeps their entries (§2.3) but loses SELECT on the
  * project row, so their own history can legitimately arrive without a name.
+ *
+ * **Only manual rows are badged.** `entry_source` is the difference between a
+ * measurement and an assertion (§5.3), and it is worth seeing — but a "Timer"
+ * badge on nearly every row would be noise that hides the exception it exists to
+ * mark. Timer-sourced is the unmarked default, the way it is the default path.
  */
 export function EntryList({
   entries,
@@ -58,7 +63,12 @@ export function EntryList({
         {entries.map((entry) => (
           <TableRow key={entry.id}>
             <TableCell className="whitespace-nowrap">
-              {formatStartedAt(entry.startedAt, timezone)}
+              <span className="flex items-center gap-2">
+                {formatStartedAt(entry.startedAt, timezone)}
+                {entry.source === "manual" ? (
+                  <Badge variant="outline">Manual</Badge>
+                ) : null}
+              </span>
             </TableCell>
             <TableCell className="font-medium">
               {entry.project?.name ?? "—"}
