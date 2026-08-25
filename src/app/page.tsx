@@ -1,3 +1,6 @@
+import Link from "next/link";
+
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -8,19 +11,21 @@ import {
 
 export default function Home() {
   return (
-    <main className="mx-auto flex max-w-2xl flex-1 flex-col justify-center px-4 py-12">
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle>Next.js Template</CardTitle>
+          <CardTitle>Timey</CardTitle>
           <CardDescription>
-            Next.js 15 + Tailwind + shadcn/ui + Supabase, ready to fork.
+            Timey records how long people work, against what.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-sm">
-            See README.md for the fork checklist and how to wire up your first
-            Supabase table.
-          </p>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Button asChild>
+            <Link href="/sign-up">Create an account</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/sign-in">Sign in</Link>
+          </Button>
         </CardContent>
       </Card>
     </main>

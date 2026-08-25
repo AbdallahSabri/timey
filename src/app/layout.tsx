@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Next.js Template",
-  description: "Production-ready Next.js + Supabase + shadcn/ui template",
+  title: "Timey",
+  description: "Timey records how long people work, against what.",
 };
 
 export default function RootLayout({

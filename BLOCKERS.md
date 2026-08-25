@@ -56,6 +56,20 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 
 ## Known, not blocking
 
+### N-3 · No email-confirmation callback route (Phase 2)
+
+`signUp` already handles the case where Supabase returns no session (confirmations on) by returning `confirmationRequired: true`, and the UI shows a "check your email" state — but there is no `/auth/confirm` route to exchange the email link's `token_hash` for a session. `enable_confirmations = false` locally, so this path has never actually run.
+
+Not blocking today because local dev has confirmations off. It becomes blocking the moment a hosted Supabase project (which defaults confirmations on) is targeted, or naturally lands as part of Phase 3's invitation-acceptance work, which needs the same token-exchange machinery. Whoever picks it up should flip `enable_confirmations = true` locally once and walk the flow for real before shipping it — it has never been exercised, only typechecked.
+
+### N-4 · Repeated inline `profiles` + `companies` reads
+
+The dashboard queries `profiles`/`companies` directly in a Server Component (an explicitly allowed read-only exception, not a new server action). Phase 3's member list and admin-gating UI will want the same "current member + company + role" read. Worth promoting to a single `getCurrentMember` action in `src/lib/actions/**` before Phase 3, rather than after two or three call sites have copy-pasted the query.
+
+### N-5 · Local database carries throwaway accounts from Phase 1 and 2 verification
+
+Several `@example.test`/`@example.com` accounts and companies exist in the local stack from adversarial testing, including a few limbo profiles. Harmless — `pnpm exec supabase db reset` clears them via the migrations — but Phase 3's two-accounts-one-company manual verification (§12.2) may want a clean slate first.
+
 ### N-1 · Node version below the declared engine floor
 
 `package.json` requires `node >=24`; the local machine runs **v22.14.0**. Every `pnpm` invocation prints an unsupported-engine warning. The Dockerfile builds on 24, so production is unaffected, and the full gate passes on 22.

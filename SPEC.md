@@ -438,7 +438,9 @@ Path B — invitee:   receives link → sign up or sign in → profile bound to 
 
 **8.3 A user whose `profiles.company_id IS NULL` is in limbo.** Middleware routes them to onboarding and blocks every other authenticated route. This state exists between signup and company creation, and is the only valid null.
 
-**Current middleware does none of this.** `src/lib/supabase/middleware.ts` performs session refresh only — no auth guard, no `company_id` check, and no destination routes to redirect to. This is the largest single gap between spec and repo.
+**Built in Phase 2.** `src/lib/supabase/middleware.ts` now performs the full guard: unauthenticated → `/sign-in`; authenticated + `company_id IS NULL` → `/onboarding`, blocked from every other route; authenticated + has a company → through, with `/onboarding` and the auth-only pages redirecting on to `/dashboard`. Verified against the local stack, not just typechecked.
+
+**8.3.1 Amendment — a limbo user hitting `/sign-in` is bounced to `/onboarding`, not shown the sign-in form.** The spec doesn't say where this case goes. Redirecting to onboarding is consistent with "blocks every other authenticated route" read literally — but it means a signed-in limbo user cannot reach `/sign-in` to switch accounts without first signing out. `/onboarding` therefore carries a sign-out control as the only way off the page. Without it, that user would be stuck.
 
 **8.4 Invitation rules:**
 
