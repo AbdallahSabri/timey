@@ -283,6 +283,73 @@ export type Database = {
           },
         ];
       };
+      time_entries: {
+        Row: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          company_id?: string;
+          created_at?: string;
+          duration_seconds?: number | null;
+          ended_at?: string | null;
+          id?: string;
+          note?: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at?: string;
+          task_id: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Update: {
+          company_id?: string;
+          created_at?: string;
+          duration_seconds?: number | null;
+          ended_at?: string | null;
+          id?: string;
+          note?: string | null;
+          project_id?: string;
+          source?: Database["public"]["Enums"]["entry_source"];
+          started_at?: string;
+          task_id?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "time_entries_project_id_company_id_fkey";
+            columns: ["project_id", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id", "company_id"];
+          },
+          {
+            foreignKeyName: "time_entries_task_id_project_id_fkey";
+            columns: ["task_id", "project_id"];
+            isOneToOne: false;
+            referencedRelation: "tasks";
+            referencedColumns: ["id", "project_id"];
+          },
+          {
+            foreignKeyName: "time_entries_user_id_company_id_fkey";
+            columns: ["user_id", "company_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id", "company_id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -313,8 +380,32 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       is_project_member: { Args: { p_project_id: string }; Returns: boolean };
+      stop_timer: {
+        Args: { p_id: string };
+        Returns: {
+          company_id: string;
+          created_at: string;
+          duration_seconds: number | null;
+          ended_at: string | null;
+          id: string;
+          note: string | null;
+          project_id: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          started_at: string;
+          task_id: string;
+          updated_at: string;
+          user_id: string;
+        }[];
+        SetofOptions: {
+          from: "*";
+          to: "time_entries";
+          isOneToOne: false;
+          isSetofReturn: true;
+        };
+      };
     };
     Enums: {
+      entry_source: "timer" | "manual";
       member_status: "active" | "inactive";
       user_role: "admin" | "employee";
     };
@@ -447,6 +538,7 @@ export const Constants = {
   },
   public: {
     Enums: {
+      entry_source: ["timer", "manual"],
       member_status: ["active", "inactive"],
       user_role: ["admin", "employee"],
     },

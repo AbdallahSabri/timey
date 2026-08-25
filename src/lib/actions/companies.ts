@@ -37,7 +37,12 @@ export type CurrentMember = {
   fullName: string;
   role: MemberRole;
   status: MemberStatus;
-  company: { id: string; name: string; timezone: string } | null;
+  company: {
+    id: string;
+    name: string;
+    timezone: string;
+    maxTimerHours: number;
+  } | null;
 };
 
 /** One row of the admin members list. */
@@ -156,7 +161,9 @@ export async function getCurrentMember(): Promise<
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, full_name, role, status, companies (id, name, timezone)")
+      .select(
+        "id, full_name, role, status, companies (id, name, timezone, max_timer_hours)",
+      )
       .eq("id", user.id)
       .maybeSingle();
 
@@ -182,6 +189,7 @@ export async function getCurrentMember(): Promise<
               id: data.companies.id,
               name: data.companies.name,
               timezone: data.companies.timezone,
+              maxTimerHours: data.companies.max_timer_hours,
             }
           : null,
       },

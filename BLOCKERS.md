@@ -91,11 +91,11 @@ Not blocking Phase 3 — the flow is complete and verifiable without it. It beco
 
 Several `@example.test`/`@example.com` accounts and companies exist in the local stack from adversarial testing, including a few limbo profiles. Harmless — `pnpm exec supabase db reset` clears them via the migrations — but Phase 3's two-accounts-one-company manual verification (§12.2) may want a clean slate first.
 
-### N-7 · Deactivated members keep read access (Phase 4, inherited from Phase 1)
+### N-7 · Deactivated members keep read access — and, as of Phase 5, write access (Phase 4/5, inherited from Phase 1)
 
-`current_company_id()` (Phase 1) doesn't check `profiles.status`; only `is_admin()` does. A deactivated employee with a live session still reads their company's clients, and their assigned projects/tasks, until that session ends. Losing admin verbs on deactivation works correctly; losing all access does not.
+`current_company_id()` (Phase 1) doesn't check `profiles.status`; only `is_admin()` does. A deactivated employee with a live session still reads their company's clients and their assigned projects/tasks — and, confirmed in Phase 5, can still **start new timers and log new time entries**, since `time_entries` INSERT checks `is_project_member()`, not status either. Losing admin verbs on deactivation works correctly; losing all access does not.
 
-Not blocking — §2.3 asks for loss of access on deactivation, and a live session outliving a deactivation is a narrow, session-lifetime window, not a standing hole. Closing it changes `current_company_id()`'s semantics for every table that calls it (all of them), so it's a deliberate cross-cutting change, not a one-table fix. Worth doing before real users depend on prompt deactivation — flag for a dedicated pass rather than folding into whichever phase happens to touch `profiles` next.
+**Escalated from non-blocking.** "Keeps reading the client list" is a narrow, session-lifetime gap. "Keeps logging billable-looking hours after being removed" is a sharper failure — deactivation is supposed to be the mechanism that stops someone's time from counting, and right now it doesn't stop new entries, only future logins. Closing it changes `current_company_id()`'s semantics for every table that calls it (all of them), so it's a deliberate cross-cutting change, not a one-table fix — but it should happen as its own pass before Phase 7 (corrections) or Phase 8 (reporting) ship, not be deferred indefinitely. Worth doing next, or at latest before real users depend on prompt deactivation.
 
 ### N-1 · Node version below the declared engine floor
 
