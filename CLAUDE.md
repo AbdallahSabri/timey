@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Reusable Next.js template — optimized for forking into new projects fast, not for building a specific product. Read this before making changes.
+Timey — team time tracking: timers and manual entries against a client → project → task hierarchy, with admin-approved corrections and reporting. `SPEC.md` is the behavioral contract, `PLAN.md` the phase ordering, `BLOCKERS.md` the decision log. Read this before making changes.
 
 ## Stack
 
