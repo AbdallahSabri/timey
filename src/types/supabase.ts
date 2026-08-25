@@ -666,6 +666,124 @@ export type Database = {
           isSetofReturn: false;
         };
       };
+      report_by_client: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          client_id: string;
+          client_name: string;
+          entry_count: number;
+          total_seconds: number;
+        }[];
+      };
+      report_by_day: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          day: string;
+          entry_count: number;
+          total_seconds: number;
+        }[];
+      };
+      report_by_project: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          client_id: string;
+          client_name: string;
+          entry_count: number;
+          project_id: string;
+          project_name: string;
+          total_seconds: number;
+        }[];
+      };
+      report_by_task: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          entry_count: number;
+          project_id: string;
+          project_name: string;
+          task_id: string;
+          task_name: string;
+          total_seconds: number;
+        }[];
+      };
+      report_by_user: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          entry_count: number;
+          total_seconds: number;
+          user_id: string;
+          user_name: string;
+        }[];
+      };
+      report_by_user_project: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          client_id: string;
+          client_name: string;
+          entry_count: number;
+          project_id: string;
+          project_name: string;
+          total_seconds: number;
+          user_id: string;
+          user_name: string;
+        }[];
+      };
+      report_summary: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          entry_count: number;
+          running_count: number;
+          total_seconds: number;
+        }[];
+      };
       stop_timer: {
         Args: { p_id: string };
         Returns: {

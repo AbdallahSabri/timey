@@ -19,6 +19,11 @@ import { SignOutButton } from "@/components/auth/sign-out-button";
  * queue above them renders only for an admin — because `is_admin()` decides who
  * may approve anything, not because the link was withheld. An employee who
  * types the URL sees their own list, which is what RLS returns them.
+ *
+ * `/reports` follows the same rule and is the clearest case of it: the route is
+ * identical for both roles and the *data* differs, because `time_entries` SELECT
+ * gives an admin the company and an employee themselves (§9.2). Withholding the
+ * link would hide a page an employee is entitled to and would protect nothing.
  */
 const NAV_LINKS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -26,6 +31,7 @@ const NAV_LINKS = [
   { href: "/clients", label: "Clients" },
   { href: "/members", label: "Team" },
   { href: "/corrections", label: "Corrections" },
+  { href: "/reports", label: "Reports" },
 ];
 
 export function AppHeader() {

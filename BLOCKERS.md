@@ -14,17 +14,19 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 **Default if unanswered:** leave as-is — no uniqueness constraint on `projects.name`. Adding one later is a straightforward additive migration (`clients_write_error_message`-style branching in `src/lib/actions/projects.ts` already anticipates the constraint's error text, so the code change is near-zero once the index exists).
 
-### B-3 · `correction_grace_minutes` — blocks Phase 7
+### B-5 · CSV only, or PDF timesheets too? — non-blocking
 
-**`SPEC.md` §10 item 1, §7.1.1.**
+**`SPEC.md` §10 item 6, §9.6.** CSV export is required for v1 regardless of the answer; PDF (for signature) is the open question.
 
-Whether an employee may fix a typo within N minutes of stopping a timer without an admin approval round-trip. Reduces queue noise; slightly weakens the audit line.
-
-**Default if unanswered:** strict zero-tolerance (no grace window), matching §7.1 as written. Adding the setting later is additive; removing it after employees rely on it is not.
+**Default if unanswered:** CSV only for Phase 8. PDF generation is additive — a separate chunk with its own rendering dependency, not a blocker to shipping reporting.
 
 ---
 
 ## Resolved — decisions answered
+
+### D-3 · `correction_grace_minutes` — proceeded on default, 2026-08-25
+
+**`SPEC.md` §10 item 1, §7.1.1.** Unanswered through Phase 7; proceeded on the stated default — strict zero-tolerance, no grace window. Every closed-entry edit routes through a correction request or `admin_edit_entry`, with no exception for a fix made minutes after stopping. Adding a grace window later is additive (a `companies` column plus a branch in the entry-edit path); the corrections machinery it would sit alongside is already built and doesn't need to change shape to accommodate it.
 
 ### D-1 · `task_id` is mandatory — answered 2026-08-25
 
