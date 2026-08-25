@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { DataCard, DataCardList } from "@/components/structure/data-card";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -60,47 +61,77 @@ export function PendingInvitationList({
     );
   }
 
+  function revokeControl(invitation: PendingInvitationRow) {
+    return (
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        disabled={pendingId === invitation.id}
+        onClick={() => void revoke(invitation)}
+      >
+        {pendingId === invitation.id ? "Revoking…" : "Revoke"}
+      </Button>
+    );
+  }
+
+  function expiryLabel(invitation: PendingInvitationRow) {
+    return invitation.expired
+      ? `Expired ${invitation.expiresLabel}`
+      : invitation.expiresLabel;
+  }
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Email</TableHead>
-          <TableHead>Role</TableHead>
-          <TableHead>Invited by</TableHead>
-          <TableHead>Expires</TableHead>
-          <TableHead className="w-24">
-            <span className="sr-only">Actions</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <>
+      <DataCardList className="md:hidden">
         {invitations.map((invitation) => (
-          <TableRow
+          <DataCard
             key={invitation.id}
-            className={cn(invitation.expired && "text-muted-foreground")}
-          >
-            <TableCell className="font-medium">{invitation.email}</TableCell>
-            <TableCell>{invitation.role}</TableCell>
-            <TableCell>{invitation.invitedByName ?? "—"}</TableCell>
-            <TableCell>
-              {invitation.expired
-                ? `Expired ${invitation.expiresLabel}`
-                : invitation.expiresLabel}
-            </TableCell>
-            <TableCell className="text-right">
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                disabled={pendingId === invitation.id}
-                onClick={() => void revoke(invitation)}
-              >
-                {pendingId === invitation.id ? "Revoking…" : "Revoke"}
-              </Button>
-            </TableCell>
-          </TableRow>
+            muted={invitation.expired}
+            title={invitation.email}
+            action={revokeControl(invitation)}
+            fields={[
+              { label: "Role", value: invitation.role },
+              { label: "Invited by", value: invitation.invitedByName ?? "—" },
+              { label: "Expires", value: expiryLabel(invitation) },
+            ]}
+          />
         ))}
-      </TableBody>
-    </Table>
+      </DataCardList>
+
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Invited by</TableHead>
+              <TableHead>Expires</TableHead>
+              <TableHead className="w-24">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {invitations.map((invitation) => (
+              <TableRow
+                key={invitation.id}
+                className={cn(invitation.expired && "text-muted-foreground")}
+              >
+                <TableCell className="font-medium">
+                  {invitation.email}
+                </TableCell>
+                <TableCell>{invitation.role}</TableCell>
+                <TableCell>{invitation.invitedByName ?? "—"}</TableCell>
+                <TableCell>{expiryLabel(invitation)}</TableCell>
+                <TableCell className="text-right">
+                  {revokeControl(invitation)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }

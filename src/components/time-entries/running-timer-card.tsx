@@ -11,6 +11,7 @@ import {
   useElapsedSeconds,
 } from "@/components/time-entries/elapsed-counter";
 import { formatStartedAt } from "@/components/time-entries/format-entry";
+import { RunningBadge } from "@/components/time-entries/running-badge";
 import { StaleTimerPrompt } from "@/components/time-entries/stale-timer-prompt";
 import { StartTimerForm } from "@/components/time-entries/start-timer-form";
 import { Badge } from "@/components/ui/badge";
@@ -120,13 +121,23 @@ export function RunningTimerCard({
   const noteChanged = note.trim() !== (timer.note ?? "");
 
   return (
-    <Card data-testid="running-timer">
+    // The one card in the app that is *live*, and the only place `--live` is
+    // spent — a ring in amber, so a running timer is identifiable across the
+    // room. A stale one escalates to `destructive` (§5.4): past the threshold
+    // the figure on screen is probably wrong, which is a different claim from
+    // "still counting".
+    <Card
+      data-testid="running-timer"
+      className={stale ? "ring-destructive/40" : "ring-live/40"}
+    >
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           Timer running
-          <Badge variant={stale ? "destructive" : "secondary"}>
-            {stale ? "Stale" : "Running"}
-          </Badge>
+          {stale ? (
+            <Badge variant="destructive">Stale</Badge>
+          ) : (
+            <RunningBadge />
+          )}
         </CardTitle>
         <CardDescription>
           {timer.project?.name ?? "Unknown project"} ·{" "}
@@ -137,7 +148,10 @@ export function RunningTimerCard({
 
       <CardContent className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <ElapsedCounter seconds={elapsed} />
+          <ElapsedCounter
+            seconds={elapsed}
+            className={stale ? "text-destructive" : "text-live"}
+          />
           <div className="flex items-center gap-2">
             <Button type="button" onClick={() => void stop()} disabled={busy}>
               {pending === "stop" ? "Stopping…" : "Stop"}

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { DataCard, DataCardList } from "@/components/structure/data-card";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -66,49 +67,85 @@ export function ProjectMemberList({
     );
   }
 
+  function removeControl(member: ProjectMemberRow) {
+    if (!canManage) {
+      return null;
+    }
+
+    return (
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        disabled={pendingId === member.userId}
+        onClick={() => void remove(member)}
+      >
+        {pendingId === member.userId ? "Removing…" : "Remove"}
+      </Button>
+    );
+  }
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Role</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Assigned</TableHead>
-          {canManage ? (
-            <TableHead className="w-24">
-              <span className="sr-only">Actions</span>
-            </TableHead>
-          ) : null}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <>
+      <DataCardList className="md:hidden">
         {members.map((member) => (
-          <TableRow
+          <DataCard
             key={member.userId}
-            className={cn(
-              member.status !== "active" && "text-muted-foreground",
-            )}
-          >
-            <TableCell className="font-medium">{member.fullName}</TableCell>
-            <TableCell>{member.role}</TableCell>
-            <TableCell>{member.status}</TableCell>
-            <TableCell>{member.addedLabel}</TableCell>
-            {canManage ? (
-              <TableCell className="text-right">
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="sm"
-                  disabled={pendingId === member.userId}
-                  onClick={() => void remove(member)}
-                >
-                  {pendingId === member.userId ? "Removing…" : "Remove"}
-                </Button>
-              </TableCell>
-            ) : null}
-          </TableRow>
+            muted={member.status !== "active"}
+            title={member.fullName}
+            action={removeControl(member)}
+            fields={[
+              { label: "Role", value: member.role },
+              { label: "Status", value: member.status },
+              {
+                label: "Assigned",
+                value: member.addedLabel,
+                numeric: true,
+              },
+            ]}
+          />
         ))}
-      </TableBody>
-    </Table>
+      </DataCardList>
+
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Assigned</TableHead>
+              {canManage ? (
+                <TableHead className="w-24">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              ) : null}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {members.map((member) => (
+              <TableRow
+                key={member.userId}
+                className={cn(
+                  member.status !== "active" && "text-muted-foreground",
+                )}
+              >
+                <TableCell className="font-medium">{member.fullName}</TableCell>
+                <TableCell>{member.role}</TableCell>
+                <TableCell>{member.status}</TableCell>
+                <TableCell className="font-mono tabular-nums">
+                  {member.addedLabel}
+                </TableCell>
+                {canManage ? (
+                  <TableCell className="text-right">
+                    {removeControl(member)}
+                  </TableCell>
+                ) : null}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }

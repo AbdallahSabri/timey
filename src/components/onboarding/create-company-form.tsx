@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { nativeSelectClassName } from "@/components/structure/select-class";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -24,10 +25,6 @@ import {
   type CreateCompanyInput,
   type CreateCompanyValues,
 } from "@/lib/validations/auth";
-
-/** Matches `Input`'s surface so the native select reads as one of the family. */
-const selectClassName =
-  "border-input focus-visible:border-ring focus-visible:ring-ring/50 disabled:bg-input/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30 dark:aria-invalid:border-destructive/50 h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-base transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:ring-3 md:text-sm";
 
 export function CreateCompanyForm({ timezones }: { timezones: string[] }) {
   const router = useRouter();
@@ -88,7 +85,7 @@ export function CreateCompanyForm({ timezones }: { timezones: string[] }) {
           <FieldLabel htmlFor="timezone">Timezone</FieldLabel>
           <select
             id="timezone"
-            className={selectClassName}
+            className={nativeSelectClassName}
             aria-invalid={errors.timezone ? true : undefined}
             {...form.register("timezone")}
           >
@@ -121,7 +118,7 @@ export function CreateCompanyForm({ timezones }: { timezones: string[] }) {
               <FieldLabel htmlFor="weekStartsOn">Week starts on</FieldLabel>
               <select
                 id="weekStartsOn"
-                className={cn(selectClassName, "max-w-56")}
+                className={cn(nativeSelectClassName, "max-w-56")}
                 aria-invalid={errors.weekStartsOn ? true : undefined}
                 {...form.register("weekStartsOn")}
               >

@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { ArchiveDialog } from "@/components/structure/archive-dialog";
+import { DataCard, DataCardList } from "@/components/structure/data-card";
 import {
   Table,
   TableBody,
@@ -57,63 +58,109 @@ export function ProjectList({
     return <p className="text-muted-foreground text-sm">{emptyMessage}</p>;
   }
 
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Project</TableHead>
-          <TableHead>Client</TableHead>
-          <TableHead>Status</TableHead>
-          {canManage ? (
-            <TableHead className="w-28">
-              <span className="sr-only">Actions</span>
-            </TableHead>
-          ) : null}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {projects.map((project) => {
-          const isArchived = project.archivedAt !== null;
+  function archiveControl(project: Project) {
+    if (!canManage || project.archivedAt !== null) {
+      return null;
+    }
 
-          return (
-            <TableRow
-              key={project.id}
-              className={cn(isArchived && "text-muted-foreground")}
-            >
-              <TableCell className="font-medium">
-                <Link
-                  href={`/projects/${project.id}`}
-                  className="hover:text-foreground underline underline-offset-4"
-                >
-                  {project.name}
-                </Link>
-                {project.description ? (
-                  <span className="text-muted-foreground block text-sm font-normal">
-                    {project.description}
-                  </span>
-                ) : null}
-              </TableCell>
-              {/* An archived client keeps its label here (§3.11) — it is only
-                  gone from the pickers. */}
-              <TableCell>{project.client?.name ?? "Internal"}</TableCell>
-              <TableCell>{isArchived ? "Archived" : "Active"}</TableCell>
+    return (
+      <ArchiveDialog
+        title={`Archive ${project.name}?`}
+        description="Time already logged against it stays, and its tasks keep their names. It disappears from pickers and cannot be un-archived — there is no restore, because the name is released when it goes."
+        triggerAriaLabel={`Archive ${project.name}`}
+        disabled={pendingId === project.id}
+        onConfirm={() => archive(project)}
+      />
+    );
+  }
+
+  return (
+    <>
+      <DataCardList className="md:hidden">
+        {projects.map((project) => (
+          <DataCard
+            key={project.id}
+            muted={project.archivedAt !== null}
+            title={
+              <Link
+                href={`/projects/${project.id}`}
+                className="hover:text-foreground underline underline-offset-4"
+              >
+                {project.name}
+              </Link>
+            }
+            meta={
+              project.description ? (
+                <span className="text-muted-foreground text-sm">
+                  {project.description}
+                </span>
+              ) : null
+            }
+            action={archiveControl(project)}
+            fields={[
+              // An archived client keeps its label here (§3.11) — it is only
+              // gone from the pickers.
+              { label: "Client", value: project.client?.name ?? "Internal" },
+              {
+                label: "Status",
+                value: project.archivedAt !== null ? "Archived" : "Active",
+              },
+            ]}
+          />
+        ))}
+      </DataCardList>
+
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Project</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead>Status</TableHead>
               {canManage ? (
-                <TableCell className="text-right">
-                  {isArchived ? null : (
-                    <ArchiveDialog
-                      title={`Archive ${project.name}?`}
-                      description="Time already logged against it stays, and its tasks keep their names. It disappears from pickers and cannot be un-archived — there is no restore, because the name is released when it goes."
-                      triggerAriaLabel={`Archive ${project.name}`}
-                      disabled={pendingId === project.id}
-                      onConfirm={() => archive(project)}
-                    />
-                  )}
-                </TableCell>
+                <TableHead className="w-28">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               ) : null}
             </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+          </TableHeader>
+          <TableBody>
+            {projects.map((project) => {
+              const isArchived = project.archivedAt !== null;
+
+              return (
+                <TableRow
+                  key={project.id}
+                  className={cn(isArchived && "text-muted-foreground")}
+                >
+                  <TableCell className="font-medium">
+                    <Link
+                      href={`/projects/${project.id}`}
+                      className="hover:text-foreground underline underline-offset-4"
+                    >
+                      {project.name}
+                    </Link>
+                    {project.description ? (
+                      <span className="text-muted-foreground block text-sm font-normal">
+                        {project.description}
+                      </span>
+                    ) : null}
+                  </TableCell>
+                  {/* An archived client keeps its label here (§3.11) — it is only
+                  gone from the pickers. */}
+                  <TableCell>{project.client?.name ?? "Internal"}</TableCell>
+                  <TableCell>{isArchived ? "Archived" : "Active"}</TableCell>
+                  {canManage ? (
+                    <TableCell className="text-right">
+                      {archiveControl(project)}
+                    </TableCell>
+                  ) : null}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }

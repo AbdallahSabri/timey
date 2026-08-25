@@ -6,7 +6,8 @@ Reusable Next.js template — optimized for forking into new projects fast, not 
 
 - Next.js 15, App Router, TypeScript strict, `src/` directory
 - Tailwind CSS v4 (CSS-first config — tokens live in `src/app/globals.css`, no `tailwind.config.ts`)
-- shadcn/ui (Radix primitives, neutral base color, "Nova" preset) — `components.json` is the source of truth
+- shadcn/ui (Radix primitives, "Nova" preset) — `components.json` is the source of truth. `baseColor` there stays `neutral` because it only seeds what the CLI scaffolds; the palette the app actually renders is the one in `globals.css` (below)
+- Theme: **ledger green + live amber**, light/dark/system via `next-themes` (`ThemeProvider` in the root layout, toggle in the header). Green is the settled record and every action that writes one; `--live` (amber) marks a running timer and nothing else. Durations and clock times are always `font-mono tabular-nums`
 - Supabase via `@supabase/ssr` — separate browser/server clients, typed against `src/types/supabase.ts`
 - pnpm — always use `pnpm`, never `npm`/`yarn`
 - ESLint (flat config, `next/core-web-vitals` + `next/typescript` + `import/order`) + Prettier (`prettier-plugin-tailwindcss`)
@@ -21,6 +22,8 @@ Reusable Next.js template — optimized for forking into new projects fast, not 
 - `src/components/[feature]/**` composes `components/ui` primitives into feature UI. May import and call server actions (prop-wiring); may not write new Supabase queries.
 - `src/lib/actions/**` returns a boolean-tagged result: `{ ok: true; data: T } | { ok: false; error: string }`. Prefer this over nullable-field unions — they don't narrow cleanly through destructuring under `strict` mode.
 - New Supabase tables: add a migration under `supabase/migrations/`, enable RLS with explicit policies, and update `src/types/supabase.ts`.
+- A primitive that needs a global correction gets a `[data-slot]` rule at the bottom of `globals.css`, not an edit to `components/ui/**`. That is where the touch-target sizing, the dialog height bound, and the toast offset live.
+- Mobile: lists render as `DataCard`s below `md` and as a `Table` at `md` and up — see `src/components/structure/data-card.tsx`. Navigation is the header row at `md` and up, `MobileTabBar` below it; destinations are declared once in `src/components/layout/nav.ts`.
 
 ## The gate
 

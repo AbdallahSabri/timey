@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { ArchiveDialog } from "@/components/structure/archive-dialog";
+import { DataCard, DataCardList } from "@/components/structure/data-card";
 import {
   Table,
   TableBody,
@@ -62,47 +63,76 @@ export function ClientList({
     );
   }
 
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Status</TableHead>
-          {canManage ? (
-            <TableHead className="w-28">
-              <span className="sr-only">Actions</span>
-            </TableHead>
-          ) : null}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {clients.map((client) => {
-          const isArchived = client.archivedAt !== null;
+  function archiveControl(client: Client) {
+    if (!canManage || client.archivedAt !== null) {
+      return null;
+    }
 
-          return (
-            <TableRow
-              key={client.id}
-              className={cn(isArchived && "text-muted-foreground")}
-            >
-              <TableCell className="font-medium">{client.name}</TableCell>
-              <TableCell>{isArchived ? "Archived" : "Active"}</TableCell>
+    return (
+      <ArchiveDialog
+        title={`Archive ${client.name}?`}
+        description="Its projects keep the name so past time stays readable, but it disappears from pickers. Archiving cannot be undone — the name becomes available again, so there is no one-click restore."
+        triggerAriaLabel={`Archive ${client.name}`}
+        disabled={pendingId === client.id}
+        onConfirm={() => archive(client)}
+      />
+    );
+  }
+
+  return (
+    <>
+      <DataCardList className="md:hidden">
+        {clients.map((client) => (
+          <DataCard
+            key={client.id}
+            title={client.name}
+            muted={client.archivedAt !== null}
+            action={archiveControl(client)}
+            fields={[
+              {
+                label: "Status",
+                value: client.archivedAt !== null ? "Archived" : "Active",
+              },
+            ]}
+          />
+        ))}
+      </DataCardList>
+
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Status</TableHead>
               {canManage ? (
-                <TableCell className="text-right">
-                  {isArchived ? null : (
-                    <ArchiveDialog
-                      title={`Archive ${client.name}?`}
-                      description="Its projects keep the name so past time stays readable, but it disappears from pickers. Archiving cannot be undone — the name becomes available again, so there is no one-click restore."
-                      triggerAriaLabel={`Archive ${client.name}`}
-                      disabled={pendingId === client.id}
-                      onConfirm={() => archive(client)}
-                    />
-                  )}
-                </TableCell>
+                <TableHead className="w-28">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               ) : null}
             </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+          </TableHeader>
+          <TableBody>
+            {clients.map((client) => {
+              const isArchived = client.archivedAt !== null;
+
+              return (
+                <TableRow
+                  key={client.id}
+                  className={cn(isArchived && "text-muted-foreground")}
+                >
+                  <TableCell className="font-medium">{client.name}</TableCell>
+                  <TableCell>{isArchived ? "Archived" : "Active"}</TableCell>
+                  {canManage ? (
+                    <TableCell className="text-right">
+                      {archiveControl(client)}
+                    </TableCell>
+                  ) : null}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }

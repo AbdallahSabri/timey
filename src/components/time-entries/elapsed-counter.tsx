@@ -46,7 +46,10 @@ export function ElapsedCounter({
 }) {
   return (
     <span
-      className={cn("font-mono text-4xl tabular-nums", className)}
+      className={cn(
+        "font-mono text-4xl leading-none font-medium tracking-tight tabular-nums sm:text-5xl",
+        className,
+      )}
       aria-live="off"
     >
       {formatClock(seconds)}
