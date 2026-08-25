@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+
+import { CorrectRunningEndTimeForm } from "@/components/corrections/correct-running-end-time-form";
 import { formatApproxHours } from "@/components/time-entries/elapsed";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,9 +20,8 @@ import {
  *
  * So this is a prompt, not a cleanup job: it interrupts, it asks, and it does
  * nothing at all until a person answers. Escape and click-outside are both
- * prevented and there is no close button, because the two answers are
- * materially different and dismissing the question by reflex should not be one
- * of them.
+ * prevented and there is no close button, because the answers are materially
+ * different and dismissing the question by reflex should not be one of them.
  *
  * **"Keep going" is a real answer, not an escape hatch.** A 14-hour shift under
  * a 12-hour threshold is stale by the company's definition and still true, and
@@ -27,21 +29,25 @@ import {
  * work actually stops. Dismissing lasts for this page load; §5.4's "on next
  * load" is what brings the prompt back.
  *
- * **§5.4's second offer — "submit a correction with the real end time" — has no
- * control here, and the copy below says so plainly rather than implying a
- * sequence.** Phase 7 built the correction flow on *closed* entries only, so
- * from this dialog there is currently one action and one deferral. It is not
- * reworded into "stop it now, then correct it": §7.4.1 read those two offers as
- * alternatives and rejected the sequential reading precisely because it forces
- * every stale timer through a materialised, fully-counted, wrong-duration entry
- * first. The honest sentence about the gap is the one that does not quietly
- * recommend the reading the spec turned down. Reported as an outstanding item
- * rather than papered over here.
+ * **§5.4's second offer — "submit a correction with the real end time" — is now
+ * reachable from here** (`BLOCKERS.md` N-9, closed). `mode` switches this
+ * dialog's body between the two-choice prompt and
+ * `CorrectRunningEndTimeForm`, in place, rather than nesting a second modal:
+ * Radix's own focus trap does not compose cleanly across two `Dialog`
+ * instances, and the entry, the elapsed time and the "nothing changes until
+ * an admin approves it" framing are all still true for both views, so the
+ * header stays fixed and only the body swaps.
+ *
+ * Filing the correction counts as "keep going" — the timer is still running
+ * and stays running until a request is approved — so a successful submit
+ * calls `onKeepRunning` the same way the button does, and dismisses for this
+ * page load.
  */
 export function StaleTimerPrompt({
   open,
   elapsed,
   maxTimerHours,
+  timeEntryId,
   stopping,
   onStopNow,
   onKeepRunning,
@@ -49,10 +55,13 @@ export function StaleTimerPrompt({
   open: boolean;
   elapsed: number;
   maxTimerHours: number;
+  timeEntryId: string;
   stopping: boolean;
   onStopNow: () => void;
   onKeepRunning: () => void;
 }) {
+  const [mode, setMode] = useState<"prompt" | "correct">("prompt");
+
   return (
     <Dialog open={open}>
       <DialogContent
@@ -71,34 +80,58 @@ export function StaleTimerPrompt({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="text-muted-foreground flex flex-col gap-2 text-sm">
-          <p>
-            <span className="text-foreground font-medium">
-              Stopping now records this moment
-            </span>{" "}
-            as the end time — not the moment you meant to stop. Nothing is
-            guessed on your behalf either way.
-          </p>
-          <p>
-            Setting a real, earlier end time needs a correction request, and
-            those can only be filed on an entry that has already stopped — so it
-            can&rsquo;t be done from here yet.
-          </p>
-        </div>
+        {mode === "prompt" ? (
+          <>
+            <div className="text-muted-foreground flex flex-col gap-2 text-sm">
+              <p>
+                <span className="text-foreground font-medium">
+                  Stopping now records this moment
+                </span>{" "}
+                as the end time — not the moment you meant to stop. Nothing is
+                guessed on your behalf either way.
+              </p>
+              <p>
+                Setting a real, earlier end time instead needs a correction
+                request — an admin reviews it before anything changes, and the
+                timer keeps running in the meantime.
+              </p>
+            </div>
 
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={stopping}
-            onClick={onKeepRunning}
-          >
-            It&rsquo;s still running
-          </Button>
-          <Button type="button" disabled={stopping} onClick={onStopNow}>
-            {stopping ? "Stopping…" : "Stop it now"}
-          </Button>
-        </DialogFooter>
+            <DialogFooter className="sm:justify-between">
+              <Button
+                type="button"
+                variant="link"
+                className="self-start px-0 sm:self-center"
+                disabled={stopping}
+                onClick={() => setMode("correct")}
+              >
+                Request a correction instead
+              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={stopping}
+                  onClick={onKeepRunning}
+                >
+                  It&rsquo;s still running
+                </Button>
+                <Button type="button" disabled={stopping} onClick={onStopNow}>
+                  {stopping ? "Stopping…" : "Stop it now"}
+                </Button>
+              </div>
+            </DialogFooter>
+          </>
+        ) : (
+          <CorrectRunningEndTimeForm
+            timeEntryId={timeEntryId}
+            onCompleted={() => {
+              setMode("prompt");
+              onKeepRunning();
+            }}
+            onCancel={() => setMode("prompt")}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

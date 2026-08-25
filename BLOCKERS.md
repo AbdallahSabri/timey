@@ -24,6 +24,10 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-7 · N-9 closed — running-timer correction now reachable from the stale prompt, 2026-08-25
+
+**`SPEC.md` §5.4, §5.4.1, §7.4.1.** `StaleTimerPrompt` (`src/components/time-entries/stale-timer-prompt.tsx`) now offers "Request a correction instead" alongside "Stop it now" / "It's still running", switching the dialog body in place to a new `CorrectRunningEndTimeForm` (`src/components/corrections/correct-running-end-time-form.tsx`). No backend work was needed — `approve_correction`'s running-entry exception (added while closing N-10) already handled this case correctly; the gap was purely the missing UI entry point. The new form is deliberately narrower than `AmendCorrectionForm`: it proposes only `proposedEndedAt`, since `running_entry_reattribution` refuses project/task/start-time changes on a running row and a wider form would collect input the server is guaranteed to reject. Filing the correction dismisses the prompt for the page load, same as "It's still running" — the timer keeps running until an admin approves it. Verified via the full gate (typecheck/lint/format/test/build, all green); live browser click-through was not possible this session (Chrome extension unavailable), so the flow has been read through carefully but not clicked through end to end — worth a real walkthrough next time the app is open in a connected browser.
+
 ### D-6 · N-8 closed — single-admin companies can now delete and create directly, 2026-08-25
 
 **`SPEC.md` §7.4, §7.4.1.** `admin_delete_entry` and `admin_create_entry` (migration `0010_admin_direct_entry_paths.sql`) join `admin_edit_entry`, giving a lone admin all three correction kinds without needing a second admin to approve anything. Both share validation with `approve_correction`'s matching branches via two newly-extracted internal helpers (`apply_entry_create`/`apply_entry_delete`) rather than duplicating overlap/future-date/membership logic — after this migration there is exactly one implementation of each operation, called from two places (the direct-admin path and the correction-approval path). `admin_delete_entry` deliberately does not inherit N-10's orphaned-running-entry exception (new scope N-8 never asked for); `admin_create_entry` carries no today-only restriction, matching `approve_correction`'s own `create` kind. Verified end to end against a company asserted to have exactly one admin: queue path reproduced as a dead end first (self-approval refused), then both new direct paths succeeded with correct revision rows.
@@ -75,12 +79,6 @@ Once `supabase/` existed, `pnpm lint` reported 205 problems and `pnpm format:che
 ---
 
 ## Known, not blocking
-
-### N-9 · §5.4's "submit a correction with the real end time" has no UI entry point yet (Phase 5/7)
-
-**`SPEC.md` §5.4, §7.4.1.** The database fully supports this: `approve_correction` explicitly allows an amend proposing only `proposed_ended_at` against a **running** entry, closing it at the corrected time (verified end to end in Phase 7). But the correction-submission UI only offers its affordance on **closed** entries — my own scoping instruction for the Phase 7 UI pass restricted it that way, before this specific running-entry case was fully worked through. The stale-timer prompt (Phase 5) honestly says a correction "can't be done from here yet" rather than offering a broken link, so nothing is misleading — but §5.4's second option is currently unreachable through the product.
-
-**Default if unanswered:** leave the honest gap as-is. Closing it is additive and small: the stale-timer prompt needs a path to the existing amend-correction form, scoped to propose only `proposedEndedAt` against the running entry — no new backend work, since `approve_correction` already handles this case correctly.
 
 ### N-3 · No email-confirmation callback route (Phase 2)
 

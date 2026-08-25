@@ -220,6 +220,7 @@ export function RunningTimerCard({
         open={stale && !promptDismissed}
         elapsed={elapsed}
         maxTimerHours={maxTimerHours}
+        timeEntryId={timer.id}
         stopping={pending === "stop"}
         onStopNow={() => void stop()}
         onKeepRunning={() => setPromptDismissed(true)}
