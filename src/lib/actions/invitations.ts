@@ -262,17 +262,32 @@ export async function createInvitation(
     // still has to — this check can lose a race with a signup completing
     // between here and redemption. It exists to move a guaranteed failure
     // forward to the person who can act on it.
-    const { data: alreadyMember, error: memberCheckError } = await supabase.rpc(
+    //
+    // **A FAILED CHECK IS NOT A FAILED INVITATION**, and this branch is
+    // deliberately not an error path. It was one, and it took invitations down
+    // in production for every address: the code shipped ahead of `0011`, the
+    // RPC answered PGRST202, and a refusal that describes nothing about the
+    // caller's request was handed to every admin who tried to invite anyone.
+    //
+    // A check allowed to be STALE has no business being FATAL. Everything that
+    // actually protects this operation is untouched by an unanswered lookup —
+    // `invitations_insert_admin` still gates admin-ness, and
+    // `accept_invitation()` still refuses a caller who already belongs to a
+    // company (23505) or whose address does not match (42501, §8.4.1). So an
+    // unavailable check degrades to exactly the behaviour that shipped before
+    // `0011` existed: the invitation is created, and the wrong one is refused
+    // at redemption instead of at send time. That is the bug `0011` set out to
+    // soften, not a new one.
+    //
+    // Truthiness rather than `=== true` for the same reason: only a definite
+    // yes refuses, and a null or absent payload from a partial failure reads as
+    // "unknown" and continues. `getPendingInvitation()` in `companies.ts` takes
+    // the same shape against the same class of failure.
+    const { data: alreadyMember } = await supabase.rpc(
       "email_is_company_member",
       { p_email: email },
     );
 
-    if (memberCheckError) {
-      return {
-        ok: false,
-        error: createInvitationErrorMessage(memberCheckError),
-      };
-    }
     if (alreadyMember) {
       return {
         ok: false,

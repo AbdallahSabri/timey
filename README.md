@@ -96,6 +96,17 @@ pnpm dlx supabase gen types typescript --project-id <project-id> > src/types/sup
 3. Copy the Project URL and anon key from **Settings → API** into `.env.local` and into your host's env config (see "Deploy on Coolify").
 4. Regenerate `src/types/supabase.ts` against the real schema.
 
+**Push migrations *before* deploying the code that calls them.** The two are never atomic: the host redeploys on a push to the branch, while `supabase db push` is a separate manual step. Deploy the code first and any action calling a not-yet-created function gets PostgREST's `PGRST202`, which surfaces as that action's generic failure message — it has happened, and it took invitations down for every address (`BLOCKERS.md` D-15). The gate cannot catch this: `pnpm build` never talks to the production database.
+
+The safe order for any change touching `supabase/migrations/**`:
+
+```bash
+pnpm exec supabase db push     # 1. schema first, additive migrations are safe ahead of the code
+git push                       # 2. then the code that uses it
+```
+
+`pnpm exec supabase migration list` prints local versus remote, and is the quickest way to check whether a deployed environment is behind.
+
 ## Routes
 
 | Route | Who | What |
