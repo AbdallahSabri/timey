@@ -29,6 +29,37 @@ const AUTH_ONLY_PATHS = new Set(["/sign-in", "/sign-up"]);
  */
 const INVITE_PATH_PREFIX = "/invite/";
 
+/**
+ * Admin-only destinations (§4.2.2). These are **routes**, not data: every
+ * policy behind them stays company-readable, because `clients` labels an
+ * employee's own projects, `profiles` names them across reports and
+ * corrections, and `projects` fills the timer's own picker. Narrowing any of
+ * those to admin would break a screen an employee is entitled to. So this
+ * hides three admin surfaces an employee has no task on; it does not make
+ * their contents secret, and nothing here is load-bearing for tenancy — RLS
+ * is (§4.3).
+ *
+ * `/corrections` is deliberately absent: §7.4 gives an employee their own
+ * requests and outcomes, and `corrections/page.tsx` already renders the admin
+ * review queue only for an admin.
+ */
+const ADMIN_ONLY_PATHS = new Set(["/members", "/clients", "/projects"]);
+
+/**
+ * `/projects/[id]` has to be caught too, and `ADMIN_ONLY_PATHS.has()` cannot
+ * see it. Matched on a segment boundary for the reason `isActivePath` gives:
+ * a bare `startsWith("/projects")` would also swallow a future
+ * `/projects-archive`.
+ */
+const ADMIN_ONLY_PREFIXES = ["/projects/"];
+
+function isAdminOnlyPath(pathname: string): boolean {
+  return (
+    ADMIN_ONLY_PATHS.has(pathname) ||
+    ADMIN_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}
+
 const ONBOARDING_PATH = "/onboarding";
 const DASHBOARD_PATH = "/dashboard";
 const SIGN_IN_PATH = "/sign-in";
@@ -116,16 +147,25 @@ export async function updateSession(request: NextRequest) {
   // guaranteed by the signup trigger, but a race on a very fresh signup or a
   // transient error would leave `companyId` null here — and limbo is the safe
   // reading, because onboarding is the one route from which a user can recover.
+  //
+  // `role` rides along on this same read rather than in a second query: the
+  // admin-only route check below needs it, and it is one more column on a row
+  // already being fetched. It fails closed for the same reason `companyId`
+  // does — an unreadable role is read as `employee`, so a transient error
+  // hides an admin page rather than opening one.
   let companyId: string | null = null;
+  let role: string | null = null;
   try {
     const { data } = await supabase
       .from("profiles")
-      .select("company_id")
+      .select("company_id, role")
       .eq("id", user.id)
       .maybeSingle();
     companyId = data?.company_id ?? null;
+    role = data?.role ?? null;
   } catch {
     companyId = null;
+    role = null;
   }
 
   if (!companyId) {
@@ -137,6 +177,15 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (pathname === ONBOARDING_PATH || AUTH_ONLY_PATHS.has(pathname)) {
+    return redirectTo(request, DASHBOARD_PATH, supabaseResponse);
+  }
+
+  // §4.2.2. Bounced to the dashboard rather than shown a refusal: an employee
+  // reaching one of these has followed a stale link or typed a URL, and there
+  // is nothing on the page for them to be refused *from*. The pages guard
+  // themselves too — middleware does not run on every rendering path, so this
+  // is the convenience and the page's own check is the one that must hold.
+  if (role !== "admin" && isAdminOnlyPath(pathname)) {
     return redirectTo(request, DASHBOARD_PATH, supabaseResponse);
   }
 

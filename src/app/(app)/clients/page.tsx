@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { ClientList } from "@/components/clients/client-list";
 import { CreateClientForm } from "@/components/clients/create-client-form";
 import { ArchivedToggle } from "@/components/structure/archived-toggle";
@@ -18,11 +20,19 @@ export const metadata: Metadata = {
 };
 
 /**
- * Everyone in the company can read the client list — `clients_select_own_company`
- * (§4.2) is company-wide and not project-scoped, so there is no membership
- * concept to narrow it with. Only an admin gets the create form and the archive
- * controls, and that split is a convenience: `createClient` and `archiveClient`
- * are admin-gated in Postgres and say so themselves if this page is ever wrong.
+ * §4.2.2: admin-only route. An employee is redirected to the dashboard — the
+ * create form and the archive controls are the whole page, and both are
+ * admin-gated in Postgres (`createClient`, `archiveClient`), so what was left
+ * for an employee was a read-only list with nothing to do on it.
+ *
+ * **The redirect is not what protects the client list.**
+ * `clients_select_own_company` (§4.2) stays company-wide, because
+ * `listProjects()` embeds it to label an employee's own projects with their
+ * client. Narrowing the policy would blank that label. This hides a route, and
+ * nothing more.
+ *
+ * The check is repeated in middleware, which does not run on every rendering
+ * path — so the page carries its own.
  *
  * The archived view is a URL, not component state: the list is server-rendered,
  * so switching it is a navigation that survives a reload.
@@ -44,10 +54,15 @@ export default async function ClientsPage({
   const isAdmin =
     currentMember?.role === "admin" && currentMember.status === "active";
 
+  if (!isAdmin) {
+    redirect("/dashboard");
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">Clients</h1>
+        <pre>{JSON.stringify(currentMember, null, 2)}</pre>
         <p className="text-muted-foreground text-sm">
           Who the work is for. A project without a client is internal.
         </p>
