@@ -34,6 +34,16 @@ const NOT_CONFIGURED =
  */
 export type CurrentMember = {
   id: string;
+  /**
+   * The auth account's address, not a profiles column — `profiles` has none.
+   * Carried because `/invite/[token]` has to compare it against the invited
+   * address (§8.4.1): without it the page offers an Accept button to someone
+   * `accept_invitation()` is certain to refuse with 42501.
+   *
+   * Nullable because `auth.users.email` is, for an account created through a
+   * provider that supplies no address.
+   */
+  email: string | null;
   fullName: string;
   role: MemberRole;
   status: MemberStatus;
@@ -69,7 +79,16 @@ function createCompanyErrorMessage(error: PostgrestError): string {
       // auth.uid() is null. Both mean the same thing to the person reading it.
       return "You need to be signed in to create a company.";
     case "23514":
-      // create_company() and the companies triggers share this code; the
+      // Three different states share this code. `pending_invitation` is the
+      // one 0012 added and it is keyed on DETAIL rather than the message,
+      // because the message embeds a company name and matching prose that
+      // varies per tenant is how a check quietly stops firing. The refusal is
+      // rendered verbatim: only the function knows which company invited them
+      // (§8.1), and paraphrasing it here would drop the one useful noun.
+      if (error.details === "pending_invitation") {
+        return error.message;
+      }
+      // create_company() and the companies triggers share the rest; the
       // timezone trigger is the only one a user can provoke with valid input.
       return error.message.includes("timezone")
         ? "That timezone is not recognised. Pick a valid IANA timezone."
@@ -89,6 +108,44 @@ function createCompanyErrorMessage(error: PostgrestError): string {
  * signature, so omitted fields are left out of the payload rather than sent
  * as null — passing null would override the default with NOT NULL and fail.
  */
+/**
+ * §8.1 Path B. The caller's own unexpired invitation, or null.
+ *
+ * `/onboarding` asks so it can show the invitation instead of a form that
+ * `create_company()` is now guaranteed to refuse (0012). This is the
+ * explanation; the function is the enforcement — a client that skips this
+ * still cannot create the company.
+ *
+ * `invitations` SELECT is admin-only (§4.2), so a limbo user cannot read their
+ * own invitation directly. `pending_invitation_for_me()` is the definer
+ * function for it, and takes no argument precisely so it cannot describe
+ * anyone else's.
+ *
+ * A failed read reports null rather than an error: onboarding then renders its
+ * ordinary form, and the database still refuses if an invitation really is
+ * outstanding. Failing toward the form keeps a transient RPC problem from
+ * stranding a legitimate Path A signup on a page with nothing on it.
+ */
+export async function getPendingInvitation(): Promise<PendingInvitation | null> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("pending_invitation_for_me");
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    const [invitation] = data;
+    return {
+      companyName: invitation.company_name,
+      role: invitation.role,
+      expiresAt: invitation.expires_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function createCompany(
   input: CreateCompanyInput,
 ): Promise<ActionResult<{ companyId: string }>> {
@@ -145,6 +202,13 @@ export async function createCompany(
  * for, and `profiles_select_own_company` covers the limbo case by PK
  * (§4.2.1).
  */
+/** One row of `pending_invitation_for_me()`. Never carries a token — see 0012. */
+export type PendingInvitation = {
+  companyName: string;
+  role: MemberRole;
+  expiresAt: string;
+};
+
 export async function getCurrentMember(): Promise<
   ActionResult<CurrentMember | null>
 > {
@@ -181,6 +245,7 @@ export async function getCurrentMember(): Promise<
       ok: true,
       data: {
         id: data.id,
+        email: user.email ?? null,
         fullName: data.full_name,
         role: data.role,
         status: data.status,

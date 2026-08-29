@@ -320,6 +320,28 @@ This reverses the position previously argued in `src/components/layout/nav.ts` �
 
 `/corrections` is deliberately **not** on the list. §7.4 gives an employee their own requests and their outcomes, and `corrections/page.tsx` already renders the admin review queue for an admin only — so the page needed no change.
 
+### 8.1.1 An invited account may not create a company — RULED
+
+A limbo user (§8.3) with an unexpired invitation outstanding cannot create a company. `create_company()` refuses with 23514, DETAIL `pending_invitation`, and `/onboarding` shows the invitation in place of the form.
+
+**The problem this fixes is a role, not a route.** Middleware parks every limbo user on `/onboarding`, and §8.2 binds whoever creates a company as its `admin`. Nothing asked whether that person had been invited — so an invitee who did not complete the accept step silently lost the role their invitation named and became the admin of a second, unwanted company. Three routes reached it without email confirmation involved: abandoning the accept page and signing in later; signing up under an address that differs from the invited one (§8.4.1 then refuses at click time, stranding them); or never opening the link. With Confirm email ON it was not a possibility but the default path.
+
+`accept_invitation()` was never at fault and is unchanged — it binds the invitation's role faithfully. The other door was the unguarded one.
+
+**Only an unexpired invitation blocks.** After §8.4's seven days the door reopens: a lapsed invitation must not lock somebody out of the product permanently.
+
+**`pending_invitation_for_me()` (`0012`) takes no argument**, so unlike `email_is_company_member()` (§8.4.2) it needs no admin check — it can only ever describe an invitation sent to the caller's own address. It returns no token, and could not: only `token_hash` is stored. That is deliberate. §8.4.1 makes the token *and* the address together the evidence of who was invited; accepting on an address match alone would drop the token half, and where `enable_confirmations` is off the address half is unverified too. Onboarding therefore blocks and explains — it never offers to accept, and the emailed link stays the only way in.
+
+### 8.1.2 The destination survives email confirmation — RULED
+
+`signUp` stores where the account was heading in `user_metadata.pending_next`; `/auth/confirm` reads it after `verifyOtp()` and redirects there.
+
+Previously the confirmation link hardcoded `next=/dashboard`, so §8.1 Path B could not survive a confirmation email at all: `SignUpForm` has no session to navigate with on that branch and dropped the destination entirely.
+
+**Metadata rather than `emailRedirectTo`.** GoTrue exposes that option to the template as `{{ .RedirectTo }}` — an absolute URL that *defaults to the Site URL when unset*, so a template built around it emits a malformed link the moment the option is missing, and it must additionally clear the project's redirect allow-list. Metadata needs neither, and needs no change to the hosted email template.
+
+**It is attacker-influenceable and is treated as such.** `user_metadata` is writable by its own user, so the value is re-validated through `safeNextPath` on read, exactly like `?next=`. The worst a caller achieves is choosing their own same-origin landing page; an invite token planted there by somebody else still buys nothing, because §8.4.1 checks the caller's address.
+
 ### 8.4.2 Inviting an existing member — RULED
 
 An invitation to an address that already belongs to the caller's company is refused at send time, not at redemption.

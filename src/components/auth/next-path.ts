@@ -63,3 +63,18 @@ export function nextParam(next: string | null | undefined): string {
     ? `?next=${encodeURIComponent(next)}`
     : "";
 }
+
+/**
+ * The `user_metadata` key carrying §8.1 Path B's destination across an email
+ * confirmation, written by `signUp` and read by `/auth/confirm`.
+ *
+ * It lives here rather than beside either of them because both are
+ * `"use server"` modules, where every export must be an async function — a
+ * shared constant cannot be published from one without also making it a
+ * server action. Same reason `lib/time/company-time.ts` exists.
+ *
+ * Whatever is read back out of it goes through `safeNextPath` above:
+ * `user_metadata` is writable by its own user, so this is exactly as
+ * attacker-influenceable as a `?next=` query parameter.
+ */
+export const PENDING_NEXT_KEY = "pending_next";

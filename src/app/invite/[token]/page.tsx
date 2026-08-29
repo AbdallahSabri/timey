@@ -185,6 +185,42 @@ export default async function InvitePage({
     </div>
   );
 
+  /*
+   * §8.4.1: the invitation was mailed to one address, and only an account
+   * holding that address may redeem it — `accept_invitation()` refuses anyone
+   * else with 42501. That refusal is unchanged and remains the enforcement;
+   * what changes here is WHEN the person finds out.
+   *
+   * Without this branch the page offers an Accept button to a mismatched
+   * account, the click fails, and a stranded user wanders into `/onboarding`
+   * — which, before 0012, made them the admin of a company nobody wanted.
+   * The button is now withheld from the one case it could never satisfy.
+   *
+   * Compared case-insensitively because `invitations.email` is `citext` and
+   * `auth.users.email` is not: a `citext`/`text` comparison in SQL folds case,
+   * and this has to agree with it or the page and the function disagree about
+   * the same pair of addresses. A member with no address at all cannot match
+   * either, and lands here too.
+   */
+  if (
+    member &&
+    member.email?.toLowerCase() !== invitation.email.toLowerCase()
+  ) {
+    return (
+      <InviteCard
+        title="This invitation is for a different address"
+        description={`${invitation.companyName} invited ${invitation.email}, but you're signed in as ${member.email ?? "an account with no email address"}. Sign out and sign in as ${invitation.email} to accept it — or ask an admin there to invite the address you use now.`}
+        footer={
+          <SignOutButton variant="outline" redirectTo={`/invite/${token}`}>
+            Sign out
+          </SignOutButton>
+        }
+      >
+        {invited}
+      </InviteCard>
+    );
+  }
+
   // Signed in with no company (§8.3) — the state that can accept.
   if (member) {
     return (

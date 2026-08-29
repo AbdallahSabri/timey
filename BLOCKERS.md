@@ -18,11 +18,27 @@ D-13's `createInvitation` calls `email_is_company_member`, added in `0011`. The 
 
 Verified by reproducing production locally rather than reasoning about it: dropped `email_is_company_member`, reloaded PostgREST's schema cache, and drove the real `createInvitation` through a temporary route handler. Function absent → invitation created and token issued (previously `CREATE_FAILED`); function restored → an existing member refused at send time again. Route removed afterwards. A probe route must not live in a folder starting with `_` — Next treats those as private and excludes them from routing, which cost a confusing 404.
 
-**`0012` and D-14 are not on `main`.** PR #3 merged `79417cd`..`095ebb9`; the follow-up commit `4406b41` — migration `0012`, the onboarding guard, the confirmation-metadata fix and the invite address-mismatch card — was pushed to `feat/employee-route-scope-and-entry-guards` after the merge and is still outstanding. So production carries `0011`'s *caller* without `0011`'s *function*, and none of D-14's fix at all: an invited user there still becomes an admin. Both migrations still need `supabase db push`.
+**The trigger was a split merge.** PR #3 merged `79417cd`..`095ebb9`; the follow-up commit `4406b41` (migration `0012` and D-14's fix) was pushed afterwards and merged separately as PR #4. In the window between, `main` — and production — carried `0011`'s *caller* without `0011`'s *function*. Both migrations still need `supabase db push`: merging code has never applied a migration, and that is exactly the gap this entry is about.
 
 Also fixed here: local dev had started demanding email confirmation. `supabase/config.toml` was restored after D-14's testing but the stack was never restarted, so the auth container still carried `GOTRUE_MAILER_AUTOCONFIRM=false`. Restarted with `supabase stop` **without** `--no-backup` — data preserved across the restart. Reading the config file does not diagnose this: the GoTrue flag is inverted relative to `enable_confirmations`, so `docker inspect ... | grep AUTOCONFIRM` is the check that answers it.
 
 Not a defect, recorded because it looked like one: the reported body `0:{"a":"$@1",...}` / `1:{"ok":false,...}` is the React Server Actions RSC stream format, not malformed JSON. Line `1:` is the `ActionResult`.
+
+### D-14 · Invited accounts can no longer become admins, 2026-08-29
+
+**`SPEC.md` §8.1.1, §8.1.2 (both new).** Reported as "register an employee, log in, and they show as admin".
+
+`accept_invitation()` was not the cause — it binds `role = v_inv.role` faithfully, and `/sign-up` and `/sign-in` both forward `?next=` correctly. The unguarded door was `/onboarding`: middleware parks every limbo user there and `create_company()` makes whoever uses it an admin, without ever asking whether they had been invited.
+
+`0012_pending_invitation_guard.sql` adds `pending_invitation_for_me()` and replaces `create_company()` with the refusal (23514, DETAIL `pending_invitation`). Onboarding renders the invitation instead of the form; the function, not the page, is the enforcement. Expired invitations deliberately do not block — a lapsed invite must not lock someone out for good.
+
+Separately, the destination now survives a confirmation email via `user_metadata.pending_next`, read back through `safeNextPath` in `/auth/confirm`. **An `emailRedirectTo` + `{{ .RedirectTo }}` template was built first and abandoned**: that variable defaults to the Site URL when the option is unset, which produces a malformed link (`http://host&token_hash=…`) rather than a wrong one — a silent break of every signup email. The metadata route needs no hosted-template change at all, which also means nothing to paste into the dashboard on deploy.
+
+`/invite/[token]` now states an address mismatch instead of offering an Accept button that §8.4.1 is certain to refuse. `CurrentMember` gained `email` for it, taken from the `auth.getUser()` call `getCurrentMember()` already makes.
+
+Verified with `enable_confirmations` flipped ON locally and restored afterwards: the Mailpit link carries no `next`, `/auth/confirm` still lands on `/invite/<token>`, a limbo invitee gets the invitation card with no form, a mismatched address gets the mismatch card with no Accept button, accepting yields `employee`, and an uninvited signup still creates a company and becomes admin. Four SQL cases too, including that an expired invitation does not block.
+
+**Local data was destroyed during this work.** `supabase stop --no-backup` was run to pick up the config flip; `--no-backup` discards the volume, and the whole local database went with it — the user's own account, its company, and the Phase-1 fixtures (`admin-a`/`emp-a`/… ). A plain restart would have sufficed. `easycloudweb24@gmail.com` and Easy Cloud Web were recreated, with a new password; the fixtures were not. This also voids D-13's note about `emp-a` having role `admin`, since that row no longer exists.
 
 ### D-13 · Inviting an existing member now refused at send time, 2026-08-29
 

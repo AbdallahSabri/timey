@@ -47,7 +47,7 @@ export function SignUpForm({ next }: { next?: string }) {
   } = form;
 
   async function onSubmit(values: SignUpInput) {
-    const result = await signUp(values);
+    const result = await signUp(values, destination);
 
     if (!result.ok) {
       toast.error(result.error);
@@ -55,7 +55,10 @@ export function SignUpForm({ next }: { next?: string }) {
     }
 
     if (result.data.confirmationRequired) {
-      // No session came back, so there is nothing to navigate to yet.
+      // No session came back, so there is nothing to navigate to yet — the
+      // destination travelled with the signup instead, into the confirmation
+      // link (§8.1 Path B). Dropping it here is what used to strand invitees
+      // on `/onboarding`.
       setConfirmationEmail(values.email);
       return;
     }

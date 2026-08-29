@@ -738,6 +738,14 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       is_project_member: { Args: { p_project_id: string }; Returns: boolean };
+      pending_invitation_for_me: {
+        Args: never;
+        Returns: {
+          company_name: string;
+          expires_at: string;
+          role: Database["public"]["Enums"]["user_role"];
+        }[];
+      };
       record_entry_revision: {
         Args: {
           p_changed_by: string;

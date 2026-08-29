@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { PENDING_NEXT_KEY, safeNextPath } from "@/components/auth/next-path";
 import { createClient } from "@/lib/supabase/server";
 import {
   MIN_PASSWORD_LENGTH,
@@ -88,6 +89,7 @@ function signInErrorMessage(error: AuthError): string {
  */
 export async function signUp(
   input: SignUpInput,
+  next?: string,
 ): Promise<ActionResult<{ confirmationRequired: boolean }>> {
   const parsed = signUpSchema.safeParse(input);
   if (!parsed.success) {
@@ -102,10 +104,37 @@ export async function signUp(
   let confirmationRequired: boolean;
   try {
     const supabase = await createClient();
+
+    // §8.1 Path B across a confirmation email. When confirmation is off this
+    // is never read: a session comes straight back and `SignUpForm` navigates
+    // itself. When it is ON, the form has nothing to navigate to and used to
+    // drop the destination entirely — every invitee resumed at the template's
+    // hardcoded `/dashboard`, and middleware sent that limbo user to
+    // `/onboarding` (§8.3). Before 0012 that made them an admin.
+    //
+    // Carried in user metadata rather than through `emailRedirectTo`: GoTrue
+    // exposes that to the template as `{{ .RedirectTo }}`, an absolute URL
+    // that defaults to the Site URL when unset — so a template built around it
+    // silently produces a malformed link the moment the option is missing, and
+    // it also has to clear the project's redirect allow-list. Metadata needs
+    // neither, and needs no change to the hosted email template at all.
+    //
+    // Attacker-influenceable, and treated as such: it is re-validated through
+    // `safeNextPath` when read (`/auth/confirm`), exactly like `?next=`. The
+    // worst a caller can do is choose their own same-origin landing page. An
+    // invite token placed here by somebody else still buys nothing —
+    // `accept_invitation()` checks the caller's address (§8.4.1).
+    const pendingNext = safeNextPath(next, "");
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName } },
+      options: {
+        data: {
+          full_name: fullName,
+          ...(pendingNext ? { [PENDING_NEXT_KEY]: pendingNext } : {}),
+        },
+      },
     });
 
     if (error) {
