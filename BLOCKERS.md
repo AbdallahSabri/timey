@@ -8,6 +8,22 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-14 · Invited accounts can no longer become admins, 2026-08-29
+
+**`SPEC.md` §8.1.1, §8.1.2 (both new).** Reported as "register an employee, log in, and they show as admin".
+
+`accept_invitation()` was not the cause — it binds `role = v_inv.role` faithfully, and `/sign-up` and `/sign-in` both forward `?next=` correctly. The unguarded door was `/onboarding`: middleware parks every limbo user there and `create_company()` makes whoever uses it an admin, without ever asking whether they had been invited.
+
+`0012_pending_invitation_guard.sql` adds `pending_invitation_for_me()` and replaces `create_company()` with the refusal (23514, DETAIL `pending_invitation`). Onboarding renders the invitation instead of the form; the function, not the page, is the enforcement. Expired invitations deliberately do not block — a lapsed invite must not lock someone out for good.
+
+Separately, the destination now survives a confirmation email via `user_metadata.pending_next`, read back through `safeNextPath` in `/auth/confirm`. **An `emailRedirectTo` + `{{ .RedirectTo }}` template was built first and abandoned**: that variable defaults to the Site URL when the option is unset, which produces a malformed link (`http://host&token_hash=…`) rather than a wrong one — a silent break of every signup email. The metadata route needs no hosted-template change at all, which also means nothing to paste into the dashboard on deploy.
+
+`/invite/[token]` now states an address mismatch instead of offering an Accept button that §8.4.1 is certain to refuse. `CurrentMember` gained `email` for it, taken from the `auth.getUser()` call `getCurrentMember()` already makes.
+
+Verified with `enable_confirmations` flipped ON locally and restored afterwards: the Mailpit link carries no `next`, `/auth/confirm` still lands on `/invite/<token>`, a limbo invitee gets the invitation card with no form, a mismatched address gets the mismatch card with no Accept button, accepting yields `employee`, and an uninvited signup still creates a company and becomes admin. Four SQL cases too, including that an expired invitation does not block.
+
+**Local data was destroyed during this work.** `supabase stop --no-backup` was run to pick up the config flip; `--no-backup` discards the volume, and the whole local database went with it — the user's own account, its company, and the Phase-1 fixtures (`admin-a`/`emp-a`/… ). A plain restart would have sufficed. `easycloudweb24@gmail.com` and Easy Cloud Web were recreated, with a new password; the fixtures were not. This also voids D-13's note about `emp-a` having role `admin`, since that row no longer exists.
+
 ### D-13 · Inviting an existing member now refused at send time, 2026-08-29
 
 **`SPEC.md` §8.4.2 (new), §4.4.** Found while diagnosing a report that "the employee sees every route". The account in question (`easycloudweb24@gmail.com`) was `admin` because it had **created** its company 22 seconds after signup — `create_company()` binds the caller as admin atomically (§8.2), which is correct and not a bug. What was a bug sat next to it: a pending invitation for that same address, role `employee`, to the same company, which `accept_invitation()` would always have refused with 23505.
