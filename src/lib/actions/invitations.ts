@@ -244,6 +244,43 @@ export async function createInvitation(
       };
     }
 
+    // §8.4. Refuse an address that is already in this company, BEFORE writing
+    // a row for it. Without this the invitation is created happily and only
+    // fails when the holder clicks the link — `accept_invitation()` raises
+    // 23505 ("this account already belongs to a company"), which is the right
+    // refusal in the wrong place: the admin learns nothing at send time, the
+    // row sits in the pending list until it expires, and a configured Resend
+    // has already mailed a link that can never work.
+    //
+    // `profiles` carries no email column and `auth.users` is unreadable from
+    // here (§4.4 — no service-role key), so this is the one question this
+    // module cannot answer itself. `email_is_company_member` is the narrow
+    // definer function for it (0011), admin-only and scoped to the caller's
+    // own company.
+    //
+    // Advisory, not the enforcement: `accept_invitation()` still refuses, and
+    // still has to — this check can lose a race with a signup completing
+    // between here and redemption. It exists to move a guaranteed failure
+    // forward to the person who can act on it.
+    const { data: alreadyMember, error: memberCheckError } = await supabase.rpc(
+      "email_is_company_member",
+      { p_email: email },
+    );
+
+    if (memberCheckError) {
+      return {
+        ok: false,
+        error: createInvitationErrorMessage(memberCheckError),
+      };
+    }
+    if (alreadyMember) {
+      return {
+        ok: false,
+        error:
+          "That address already belongs to someone in your company. Change their role from the member list instead.",
+      };
+    }
+
     // §8.4 replace-don't-stack. Scoped to this company by the DELETE policy;
     // the explicit company_id keeps the intent readable and the statement
     // correct on its own terms rather than only under RLS.

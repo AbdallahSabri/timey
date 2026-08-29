@@ -8,6 +8,32 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-13 · Inviting an existing member now refused at send time, 2026-08-29
+
+**`SPEC.md` §8.4.2 (new), §4.4.** Found while diagnosing a report that "the employee sees every route". The account in question (`easycloudweb24@gmail.com`) was `admin` because it had **created** its company 22 seconds after signup — `create_company()` binds the caller as admin atomically (§8.2), which is correct and not a bug. What was a bug sat next to it: a pending invitation for that same address, role `employee`, to the same company, which `accept_invitation()` would always have refused with 23505.
+
+`createInvitation` never checked whether the address was already a member. It could not: `profiles` has no email column, `auth.users` is unreadable from the actions layer, and §4.4 rules out a service-role key. So `0011_invite_existing_member_guard.sql` adds `email_is_company_member(citext)` — `SECURITY DEFINER`, `stable`, scoped to `current_company_id()`, **admin-only** because it is an email oracle and §4.2 does not otherwise expose member addresses. Migration and calling code were written as separate passes (§0.2), types regenerated in between.
+
+Verified against the real database: as the company admin it returns true for both members, false for an outsider, and false for a member of *another* company (tenancy holds); as an employee it raises 42501; as `anon` it is refused at the GRANT before the body runs. `accept_invitation()` is untouched and remains the enforcement — the new check is advisory and can lose a race with a signup landing between send and redemption.
+
+The stale self-invitation was revoked. Note for whoever reads the member list next: `emp-a.1787682839109@example.com` is a fixture whose profile role is `admin` despite its name — it was invited as an employee and promoted later, and it is easy to mistake for an employee when testing.
+
+### D-12 · Employee route scope narrowed, and §6.4 widened to both ends, 2026-08-29
+
+**`SPEC.md` §4.2.2 (new), §6.4, §7.1.** Two unrelated user requests, landed together.
+
+**Routes.** `/members`, `/clients`, `/projects` and `/projects/[id]` are now admin-only, guarded in `src/lib/supabase/middleware.ts` (`role` rides along on the `profiles` read that already fetched `company_id`, so no extra round trip) and again in each page. `nav.ts` gained an `adminOnly` flag and a `navLinksFor(role)` helper that both pieces of chrome must call; the role is read once in `(app)/layout.tsx` and handed down, so the header row and the tab bar cannot disagree. This **reverses** the position `nav.ts` argued at length — that every link is shown to every role because withholding one protects nothing. The protection claim was correct and is restated in §4.2.2; the conclusion was not, because a link to a page whose every control refuses you is a dead end.
+
+**No policy changed, deliberately.** `clients`, `profiles` and `projects` SELECT all stay as they were, because `listProjects()`'s client-label embed, member names across reports and corrections, and the timer's own project picker read through them. So this hides three admin surfaces without making their contents confidential — stated in §4.2.2 so the limit is arguable rather than assumed. Confidentiality would be a separate change with three replacement readers attached.
+
+`/corrections` was initially in scope and was pulled back out on the user's instruction — keep the page, hide the admin queue only. It turned out to need no change at all: `corrections/page.tsx` already gates the queue at both the fetch (`isAdmin ? await listPendingCorrectionRequests() : null`) and the render, while `MyCorrectionsList` renders for everyone, which is exactly what §7.4 entitles an employee to. So §7.4 needed no amendment either.
+
+**One planned step was wrong and was not taken.** The plan called for suppressing the phone's "More" trigger once an employee's overflow came out empty (both non-primary destinations being admin-only). `MobileTabBar` also carries the **only sign-out reachable on a phone** — the header's is `md`-only — so suppressing it would have stranded every employee in their session. "More" now survives an empty overflow and drops only the separator above sign-out.
+
+**§6.4.** `createManualEntry` guarded `started_at` against the future but never `ended_at`, so an entry submitted at 10:00 for 09:00 → 23:59 booked fourteen unworked hours, and 09:00 → tomorrow 05:00 passed too. `assert_entry_window_valid()` (`0006`) had guarded both ends since Phase 7, on the reasoning that an interval which has ended ended in the past; its comment assumed §7.1's today-only rule "incidentally caps the other end" for manual entries, which is false — today-only tests `companyLocalDate(started_at)` only. One branch added, reusing `FUTURE_GRACE_MS`; §6.4 amended to name both ends. `ended_at > started_at` needed no work: it was already enforced in the action, by the `time_entries` CHECK, and by `assert_entry_window_valid()`.
+
+**Not covered by the suite.** `src/lib/actions/**` has no test harness in this repo — it needs a real database (§12.1, N-2) — so the `ended_at` branch is verified by the §12.2-style manual checks, not by Vitest. Nav and tab-bar behaviour did gain unit coverage (both roles, the empty-overflow case, and the fail-closed null role). Full gate green.
+
 ### D-11 · B-5 answered — CSV only, no PDF, 2026-08-25
 
 **`SPEC.md` §10 item 6, §9.6.** User confirmed the standing default rather than requesting PDF timesheets. No change: CSV export (Phase 8) is the only export format. PDF generation stays additive — a separate chunk with its own rendering dependency — if it's ever wanted later.

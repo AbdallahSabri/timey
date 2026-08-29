@@ -304,6 +304,34 @@ Recorded because §11 requires conflicts to amend the spec rather than be coded 
 - **`companies.timezone` is validated by trigger, not `CHECK`** — a CHECK constraint cannot subquery `pg_timezone_names`. This matters because §6.1 evaluates `started_at AT TIME ZONE timezone` in every report, so an invalid value would break reporting rather than fail at write time.
 - **`profiles.full_name` cannot be guaranteed meaningful by the database.** The signup trigger falls back through user metadata → email local-part → a placeholder, because an OAuth or magic-link signup carrying no name would otherwise hit NOT NULL and lock the user out entirely. The application must still collect a real name; the database guarantees only non-blank.
 
+### 4.2.2 Admin-only routes — RULED
+
+`/members`, `/clients`, `/projects` and `/projects/[id]` render for an admin only. An employee reaching one is redirected to `/dashboard`, by `src/lib/supabase/middleware.ts` and again by the page itself — middleware does not run on every rendering path, so neither check is sufficient alone.
+
+**No policy in §4.2 changes, and that is the ruling, not an omission.** Every table behind these routes stays company-readable because other screens an employee is entitled to read through them:
+
+- `clients` SELECT stays company-wide — `listProjects()` embeds it to label an employee's own projects with their client.
+- `profiles` SELECT stays company-wide — member names are read across reports, corrections, and project assignment.
+- `projects` SELECT stays `admin_or_member` — the timer and the manual-entry form populate their pickers through it, so narrowing it would stop an employee logging time at all.
+
+**So this hides three admin surfaces; it does not make their contents confidential.** An employee still sees client names on the dashboard's project picker and member names throughout corrections and reports. If confidentiality is ever wanted, it is a separate change: new admin-only policies *plus* replacements for the three readers above. Recorded here so the limit is arguable rather than assumed.
+
+This reverses the position previously argued in `src/components/layout/nav.ts` — that withholding a link protects nothing, therefore every link is shown to every role. That was right about the protection and wrong about the conclusion: a link to a page whose every control refuses you is a dead end, not a neutral one.
+
+`/corrections` is deliberately **not** on the list. §7.4 gives an employee their own requests and their outcomes, and `corrections/page.tsx` already renders the admin review queue for an admin only — so the page needed no change.
+
+### 8.4.2 Inviting an existing member — RULED
+
+An invitation to an address that already belongs to the caller's company is refused at send time, not at redemption.
+
+`accept_invitation()` has always refused it (23505, "this account already belongs to a company"), but that is the right refusal in the wrong place: the admin learns nothing, the row occupies the pending list until it expires, and a configured Resend has already delivered a link that can never work. Observed for real — a company's sole admin invited their own address as an employee and got a structurally un-acceptable invitation.
+
+The check needs a database function because the actions layer cannot ask the question: `profiles` carries no email column, `auth.users` is unreadable without a service-role key, and §4.4 forbids one. `email_is_company_member(citext)` (`0011`) is the narrow `SECURITY DEFINER` answer, scoped to `current_company_id()`.
+
+**It is admin-only (42501 otherwise), and that is the ruling.** The function is an email oracle — it answers "does this address belong to your company" for any address named. §4.2 lets a member see *who* is in the company but not their addresses, so granting this to every member would widen the matrix by a column nobody asked for. Only an admin invites, so only an admin needs the answer.
+
+`accept_invitation()` remains the enforcement. The new check is advisory and can lose a race with a signup completing between send and redemption; it moves a guaranteed failure forward to the person who can act on it.
+
 ### 4.4 No service-role key in the application — RULED
 
 Anything requiring elevated privileges runs as a `SECURITY DEFINER` Postgres function with a narrow signature. Handing the service key to a Next.js server action means one forgotten `company_id` filter leaks every tenant.
@@ -390,7 +418,9 @@ Never `date_trunc('day', started_at)` — that buckets by UTC and shifts every r
 
 **6.3 DST.** Because everything is `timestamptz` and durations are computed as instant differences, a shift spanning a DST boundary records true elapsed time (a 23-hour or 25-hour "day" is handled correctly). No special-casing required. This is a consequence of the type choice, stated so nobody "fixes" it later.
 
-**6.4 No future entries.** `started_at` may not exceed `now() + 5 minutes`. The grace absorbs minor clock drift on manual entry; anything beyond is rejected.
+**6.4 No future entries.** Neither `started_at` nor `ended_at` may exceed `now() + 5 minutes`. The grace absorbs minor clock drift on manual entry; anything beyond is rejected.
+
+*Amended.* This section originally named `started_at` alone. `assert_entry_window_valid()` (`0006_corrections.sql`) already applied the rule to both ends on the correction path, reasoning that an interval which has *ended* ended in the past — so the wider rule can refuse nothing legitimate. Its comment assumed §7.1's today-only rule "incidentally caps the other end" for a manual entry; it does not, because today-only tests `companyLocalDate(started_at)` and says nothing about where `ended_at` falls. Until `createManualEntry` was brought into line, a manual entry submitted at 10:00 for 09:00 → 23:59 booked fourteen hours nobody had worked, and 09:00 → tomorrow 05:00 passed too. The amendment closes a divergence between the two paths rather than inventing a rule.
 
 ---
 

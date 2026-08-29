@@ -3,24 +3,29 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { isActivePath, NAV_LINKS } from "@/components/layout/nav";
+import { isActivePath, navLinksFor } from "@/components/layout/nav";
 import { cn } from "@/lib/utils";
+import type { MemberRole } from "@/lib/validations/members";
 
 /**
  * The inline nav row, `md` and up. Hidden below that, where `MobileTabBar`
- * takes over — the six links do not fit a phone's header at any font size worth
- * reading.
+ * takes over — an admin's six links do not fit a phone's header at any font
+ * size worth reading.
+ *
+ * The list comes from `navLinksFor(role)`, never `NAV_LINKS` directly, so this
+ * row and the tab bar always show one role the same destinations.
  *
  * A client component only because the current page is a client-side fact:
  * `usePathname()` is what marks the active link, and until now nothing in the
  * app told you where you were. `AppHeader` stays a server component around it.
  */
-export function DesktopNav() {
+export function DesktopNav({ role }: { role: MemberRole | null }) {
   const pathname = usePathname();
+  const links = navLinksFor(role);
 
   return (
     <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
-      {NAV_LINKS.map((link) => {
+      {links.map((link) => {
         const active = isActivePath(pathname, link.href);
 
         return (

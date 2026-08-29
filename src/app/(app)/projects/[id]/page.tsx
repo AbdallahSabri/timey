@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { AddProjectMemberForm } from "@/components/project-members/add-project-member-form";
 import { ProjectMemberList } from "@/components/project-members/project-member-list";
@@ -43,6 +43,11 @@ function formatAdded(addedAt: string): string {
  * Everything admin-only on this page is admin-only in Postgres first. Hiding a
  * control is not what stops an employee changing a project — `tasks_*_admin`
  * and `project_members_*_admin` are.
+ *
+ * §4.2.2: admin-only route, like its parent. The redirect sits *after* the
+ * 404, deliberately — an employee asking for a project id that does not exist,
+ * or that they are not a member of, should get the same `notFound()` an admin
+ * would, not a redirect that tells them the id was real.
  */
 export default async function ProjectPage({
   params,
@@ -76,6 +81,11 @@ export default async function ProjectPage({
   const currentMember = memberResult.ok ? memberResult.data : null;
   const isAdmin =
     currentMember?.role === "admin" && currentMember.status === "active";
+
+  if (!isAdmin) {
+    redirect("/dashboard");
+  }
+
   const isArchived = project.archivedAt !== null;
 
   // An archived project is a dead end — nothing un-archives it (§3.11) — so it

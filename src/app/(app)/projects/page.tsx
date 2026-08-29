@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { CreateProjectForm } from "@/components/projects/create-project-form";
 import { ProjectList } from "@/components/projects/project-list";
 import { ArchivedToggle } from "@/components/structure/archived-toggle";
@@ -19,13 +21,20 @@ export const metadata: Metadata = {
 };
 
 /**
- * One route for both roles. `listProjects()` is role-asymmetric at the policy
- * level (§3.6.1): an admin gets every project in the company, an employee gets
- * only the ones they are assigned to. This page adds no filter of its own — the
- * role read below decides which *controls* render, nothing about which rows do.
+ * §4.2.2: admin-only route. `listProjects()` is still role-asymmetric at the
+ * policy level (§3.6.1) — an admin gets every project in the company, an
+ * employee only those they are assigned to — and that asymmetry is untouched.
+ * What changed is who reaches this page: an employee is redirected to the
+ * dashboard, where the timer's own picker gives them their projects in the one
+ * place they need them.
  *
- * An employee on no projects therefore sees an empty list, which is a correct
- * answer and not an error.
+ * **The redirect is not what protects the project list.**
+ * `projects_select_admin_or_member` stays exactly as it was, because the timer
+ * and the manual-entry form both populate their pickers through it. Narrowing
+ * it would stop an employee logging time at all.
+ *
+ * The check is repeated in middleware, which does not run on every rendering
+ * path — so the page carries its own.
  */
 export default async function ProjectsPage({
   searchParams,
@@ -43,6 +52,10 @@ export default async function ProjectsPage({
   const currentMember = memberResult.ok ? memberResult.data : null;
   const isAdmin =
     currentMember?.role === "admin" && currentMember.status === "active";
+
+  if (!isAdmin) {
+    redirect("/dashboard");
+  }
 
   // Active clients only, and only for the form that uses them (§3.11 —
   // archived rows are excluded from pickers).

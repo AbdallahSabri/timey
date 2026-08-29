@@ -723,6 +723,7 @@ export type Database = {
         Returns: string;
       };
       current_company_id: { Args: never; Returns: string };
+      email_is_company_member: { Args: { p_email: string }; Returns: boolean };
       hash_invitation_token: { Args: { p_token: string }; Returns: string };
       invitation_preview: {
         Args: { p_token: string };
