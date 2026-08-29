@@ -8,6 +8,22 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-15 · Production invitations broke on a code-ahead-of-schema deploy, 2026-08-29
+
+**`README.md` §"Pointing at a hosted project".** Every invitation in production failed with "Could not send the invitation. Please try again." for every address.
+
+D-13's `createInvitation` calls `email_is_company_member`, added in `0011`. The code was deployed; the migration was not. PostgREST answered `PGRST202`, `createInvitationErrorMessage` had no case for it, and `default:` returned `CREATE_FAILED`. Probing the cloud project confirmed the shape: tables answered `401/42501` (present — `anon` simply lacks the grant) while `email_is_company_member` and `pending_invitation_for_me` answered `PGRST202`. Note that probing an RPC *without* its parameters also returns `PGRST202`, so the first probe was a false signal until each function was called with its real argument.
+
+**Two defects, and the second is the one worth keeping.** The deploy ordering caused the outage; but the check was implemented as fatal despite its own comment calling it *"Advisory, not the enforcement"*. A check permitted to be **stale** — it can lose a race with a signup between send and redemption — has no business being **fatal**. It now ignores any RPC error and refuses only on a definite yes, degrading to exactly the pre-`0011` behaviour: the invitation is created, and the wrong one is refused at redemption by `accept_invitation()` (23505/42501), which was always the enforcement. `getPendingInvitation()` already had this shape, which is why onboarding degraded gracefully on the same missing migration while invitations did not.
+
+Verified by reproducing production locally rather than reasoning about it: dropped `email_is_company_member`, reloaded PostgREST's schema cache, and drove the real `createInvitation` through a temporary route handler. Function absent → invitation created and token issued (previously `CREATE_FAILED`); function restored → an existing member refused at send time again. Route removed afterwards. A probe route must not live in a folder starting with `_` — Next treats those as private and excludes them from routing, which cost a confusing 404.
+
+**The trigger was a split merge.** PR #3 merged `79417cd`..`095ebb9`; the follow-up commit `4406b41` (migration `0012` and D-14's fix) was pushed afterwards and merged separately as PR #4. In the window between, `main` — and production — carried `0011`'s *caller* without `0011`'s *function*. Both migrations still need `supabase db push`: merging code has never applied a migration, and that is exactly the gap this entry is about.
+
+Also fixed here: local dev had started demanding email confirmation. `supabase/config.toml` was restored after D-14's testing but the stack was never restarted, so the auth container still carried `GOTRUE_MAILER_AUTOCONFIRM=false`. Restarted with `supabase stop` **without** `--no-backup` — data preserved across the restart. Reading the config file does not diagnose this: the GoTrue flag is inverted relative to `enable_confirmations`, so `docker inspect ... | grep AUTOCONFIRM` is the check that answers it.
+
+Not a defect, recorded because it looked like one: the reported body `0:{"a":"$@1",...}` / `1:{"ok":false,...}` is the React Server Actions RSC stream format, not malformed JSON. Line `1:` is the `ActionResult`.
+
 ### D-14 · Invited accounts can no longer become admins, 2026-08-29
 
 **`SPEC.md` §8.1.1, §8.1.2 (both new).** Reported as "register an employee, log in, and they show as admin".
