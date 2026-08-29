@@ -867,26 +867,36 @@ const UNKNOWN_TIMEZONE =
  * §7.1: "Create a manual entry dated **today** — Yes." Everything else in that
  * table's manual-entry rows is a No that routes to a correction request.
  *
- * **Three validations, in this order, and the order is deliberate:**
+ * **Four validations, in this order, and the order is deliberate:**
  *
  *  1. `ended_at > started_at`. Checked on the resolved INSTANTS, never on the
  *     submitted wall clocks — see `manualEntrySchema` for why string order is
  *     not instant order across a DST boundary. The database's CHECK is the real
  *     enforcement (23514); this exists so the common typo answers immediately
  *     and specifically instead of round-tripping into a constraint name.
- *  2. §6.4's future guard, `started_at <= now() + 5 minutes`. **Not enforced by
- *     the database** — 0005 scoped it out explicitly, because Phase 5 never
- *     produced a client timestamp to guard. This is the enforcement, not a
- *     double-check of one. The grace is five minutes exactly, so a user
- *     rounding "I'm about to start at 10:00" up by three minutes is accepted
- *     and one dating tomorrow is not.
- *  3. §7.1's today-only rule, evaluated as
+ *  2. §6.4's future guard on `started_at`, `<= now() + 5 minutes`. **Not
+ *     enforced by the database** — 0005 scoped it out explicitly, because
+ *     Phase 5 never produced a client timestamp to guard. This is the
+ *     enforcement, not a double-check of one. The grace is five minutes
+ *     exactly, so a user rounding "I'm about to start at 10:00" up by three
+ *     minutes is accepted and one dating tomorrow is not.
+ *  3. **The same guard on `ended_at`.** §6.4 names `started_at` only, and
+ *     `assert_entry_window_valid()` in 0006 already extends it to the closing
+ *     instant for corrections, reasoning that an interval which has ENDED
+ *     ended in the past — so the rule can refuse nothing legitimate. That
+ *     function's comment assumed §7.1's today-only rule "incidentally caps the
+ *     other end" for a manual entry. **It does not:** today-only tests
+ *     `companyLocalDate(started_at)`, which says nothing about where
+ *     `ended_at` falls. Without this branch, 09:00 -> 23:59 submitted at 10:00
+ *     books fourteen hours nobody has worked, and 09:00 -> tomorrow 05:00
+ *     passes too. Recorded as an amendment in §6.4.
+ *  4. §7.1's today-only rule, evaluated as
  *     `companyLocalDate(started) === companyLocalDate(now)` in
  *     `companies.timezone` — never the server's zone and never the browser's.
  *
  * Future before today, because both refuse a timestamp dated tomorrow and
  * "you cannot log time that has not happened yet" is the more useful of the two
- * sentences. Yesterday reaches the today check untouched by the future one.
+ * sentences. Yesterday reaches the today check untouched by the future ones.
  *
  * The refusal for a past date names corrections without linking to them:
  * §7.1's route exists in the spec and not yet in the product (Phase 7), and a
@@ -947,7 +957,10 @@ export async function createManualEntry(
     return { ok: false, error: "An entry has to end after it starts." };
   }
 
-  if (startedAt.getTime() > now + FUTURE_GRACE_MS) {
+  if (
+    startedAt.getTime() > now + FUTURE_GRACE_MS ||
+    endedAt.getTime() > now + FUTURE_GRACE_MS
+  ) {
     return {
       ok: false,
       error: "You can't log time that hasn't happened yet.",
