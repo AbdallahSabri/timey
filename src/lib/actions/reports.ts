@@ -9,11 +9,20 @@ import type { ActionResult } from "@/lib/actions/auth";
 // `profiles -> companies` query here would be a second place for §4.2.1's limbo
 // case to be handled differently.
 import { getCurrentMember } from "@/lib/actions/companies";
-import { csvForReport, reportCsvFilename } from "@/lib/reports/columns";
+import {
+  csvForReport,
+  csvForReportEntries,
+  reportCsvFilename,
+  reportEntriesCsvFilename,
+} from "@/lib/reports/columns";
 import { createClient } from "@/lib/supabase/server";
 import {
+  ENTRIES_PER_PAGE,
+  reportEntriesRequestSchema,
   reportFiltersSchema,
   reportRequestSchema,
+  type ReportEntriesRequest,
+  type ReportEntriesRequestInput,
   type ReportFiltersInput,
   type ReportRequestInput,
 } from "@/lib/validations/reports";
@@ -145,6 +154,69 @@ export type ReportResult =
   | { grouping: "client"; rows: ReportClientRow[] }
   | { grouping: "user-project"; rows: ReportUserProjectRow[] };
 
+/**
+ * §9.7's detail row: one time entry, with every label resolved and both clock
+ * readings already converted to the company timezone by the SQL (0013's
+ * DEPARTURE 2 — `startedAt` is `"2026-09-01T09:02:11"`, a wall clock with no
+ * offset, and attaching one or feeding it to `new Date()` re-interprets it in
+ * whatever zone the reader happens to be in).
+ *
+ * **This is not a seventh `ReportResult` variant and must not be folded into
+ * one.** `ReportResult`'s tag exists so `csvForReport` and `describeReport` can
+ * switch exhaustively over the six §9.3 *aggregations*, each of which has an
+ * `entryCount`, a `totalSeconds`, and a footer total that sums its own visible
+ * rows. This shape has none of the three: it aggregates nothing, it is
+ * paginated, and §9.7 rules out a footer total precisely because a page of 50
+ * rows out of 312 cannot honestly carry one. Adding it as a variant would make
+ * those switches claim to handle a row they cannot render (`SPEC.md` §9.7's own
+ * "deliberately not a seventh grouping"). The range figures stay where they
+ * already are, in `getReportSummary`.
+ *
+ * `endedAt` and `durationSeconds` are null on exactly the running rows, and
+ * together they *are* the "in progress" flag — 0013 returns no status column
+ * because `duration_seconds` is GENERATED from `ended_at` (§3.7), so there is no
+ * third state to represent. §9.4's exclusion of running entries from totals is
+ * the caller's obligation the moment it sums these: `report_summary` remains the
+ * sanctioned source of range totals, and nothing derived here may disagree
+ * with it.
+ */
+export type ReportEntryRow = {
+  id: string;
+  /** `YYYY-MM-DD`, the company-local day the entry started in (§6.1, §5.5). */
+  day: string;
+  /** Company wall clock, `YYYY-MM-DDTHH:MM:SS`, no offset — never a UTC instant. */
+  startedAt: string;
+  /** Null while the timer runs. */
+  endedAt: string | null;
+  /** Null while the timer runs; integer seconds otherwise (§9.5). */
+  durationSeconds: number | null;
+  userId: string;
+  userName: string | null;
+  projectId: string;
+  projectName: string | null;
+  taskId: string;
+  taskName: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  source: Database["public"]["Enums"]["entry_source"];
+  note: string | null;
+};
+
+/**
+ * One page of §9.7's list, with the size of the whole filtered set alongside it.
+ *
+ * `totalCount` is what the pagination control needs and what `rows.length`
+ * cannot tell it: on the last page they differ, and on an over-shot page number
+ * `rows` is empty while the set is not.
+ */
+export type ReportEntriesPage = {
+  rows: ReportEntryRow[];
+  /** The whole filtered set, not this page. */
+  totalCount: number;
+  page: number;
+  perPage: number;
+};
+
 // ---------------------------------------------------------------------------
 // Raw rows, with the label columns corrected
 // ---------------------------------------------------------------------------
@@ -192,6 +264,36 @@ type RawUserProjectRow = LabelNullable<
 
 type RawSummaryRow = Fn["report_summary"]["Returns"][number];
 
+/**
+ * 0013's row, widened for **two different reasons** that happen to need the same
+ * correction — worth separating, because only the first is the one the long note
+ * at the top of this file describes.
+ *
+ * `user_name`, `project_name`, `task_name`, `client_name` and `client_id` are
+ * the familiar case: LEFT joins over rows the caller may not be able to read
+ * (0013's note (a)), typed non-null only because `RETURNS TABLE` carries no
+ * nullability for the generator to read.
+ *
+ * `local_ended_at` and `duration_seconds` are **genuinely nullable columns**,
+ * not unreadable labels. They are null on exactly the running entries, which
+ * 0013's DEPARTURE 1 deliberately includes in this result — the generator is
+ * equally wrong about them, but a `?? 0` here would not merely invent a label,
+ * it would turn a running timer into a completed zero-second entry inside a
+ * timesheet. `note` is nullable in the table itself (§3.7) for a third, entirely
+ * ordinary reason: entries need not carry one.
+ */
+type RawEntryRow = LabelNullable<
+  Fn["report_entries"]["Returns"][number],
+  | "user_name"
+  | "project_name"
+  | "task_name"
+  | "client_name"
+  | "client_id"
+  | "local_ended_at"
+  | "duration_seconds"
+  | "note"
+>;
+
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
@@ -214,6 +316,21 @@ type ReportArgs = {
   p_client_id?: string;
   p_project_id?: string;
   p_task_id?: string;
+};
+
+/**
+ * `report_entries`' parameters: the same six every 0007 function takes, plus
+ * 0013's page window.
+ *
+ * Both page parameters are required here rather than optional, unlike the
+ * filters above. The filters have a meaningful "off" that the function's own
+ * `default null` expresses; a window does not — omitting `p_limit` would take
+ * 0013's default of 50, which is right for one screen and wrong for an export,
+ * so every caller states which it wants.
+ */
+type ReportEntriesArgs = ReportArgs & {
+  p_limit: number;
+  p_offset: number;
 };
 
 /**
@@ -563,6 +680,230 @@ export async function getReportSummary(
 }
 
 // ---------------------------------------------------------------------------
+// §9.7 — the detail view
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse an entries request and turn it into RPC arguments.
+ *
+ * **The double parse is not redundant, and neither half can be dropped.**
+ * `reportEntriesRequestSchema` owns `page` — the one field `prepare` has never
+ * heard of — and it is what refuses a 400-day range or an absurd page number
+ * with its own sentence before any round trip happens. `prepare` owns the
+ * filters *and* §9.2's employee scoping, and that scoping must stay in exactly
+ * one place: a second `isAdmin ? userId : ownId` written here would be a second
+ * definition of who an admin is, free to drift from the policy's (§0.2). So the
+ * page half is peeled off, the filter half is handed to `prepare` unchanged, and
+ * the window is spread onto what comes back.
+ *
+ * The re-parse `prepare` performs on the already-parsed filters is idempotent —
+ * the day and uuid schemas are trims and regexes over values that have been
+ * through them once — so it costs a few microseconds and buys the property that
+ * `prepare` is safe to call from anywhere.
+ *
+ * Not exported: a `'use server'` module publishes every export as an endpoint,
+ * and this has no caller outside the file.
+ */
+async function prepareEntries(
+  input: ReportEntriesRequestInput,
+): Promise<
+  ActionResult<{ request: ReportEntriesRequest; filterArgs: ReportArgs }>
+> {
+  const parsed = reportEntriesRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Could not list those entries.",
+    };
+  }
+
+  // `page` is split off so that `filters` is exactly the §9.2 filter set
+  // `prepare` accepts, and put back on the request the caller receives — which
+  // is where the page number is actually read.
+  const { page, ...filters } = parsed.data;
+
+  const args = await prepare(filters);
+  if (!args.ok) {
+    return args;
+  }
+
+  // The window is left to the caller: one page for the screen, 200 at a time for
+  // the export. `p_limit` and `p_offset` are the only difference between them.
+  return {
+    ok: true,
+    data: { request: { ...filters, page }, filterArgs: args.data },
+  };
+}
+
+/**
+ * One call to `report_entries`, mapped.
+ *
+ * Split out from the two public entry points because the export reads the same
+ * rows a page at a time: a second copy of this mapping would be a second place
+ * for a running row's nulls to be handled differently, which is the failure
+ * 0013's DEPARTURE 1 warns about at length.
+ *
+ * Not exported, for the `'use server'` reason above.
+ */
+async function queryEntries(
+  args: ReportEntriesArgs,
+): Promise<ActionResult<{ rows: ReportEntryRow[]; totalCount: number }>> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("report_entries", args);
+
+    if (error) {
+      return { ok: false, error: reportErrorMessage(error) };
+    }
+
+    const rows: RawEntryRow[] = data;
+
+    return {
+      ok: true,
+      data: {
+        rows: rows.map((row) => ({
+          id: row.entry_id,
+          day: row.day,
+          startedAt: row.local_started_at,
+          endedAt: row.local_ended_at,
+          durationSeconds: row.duration_seconds,
+          userId: row.user_id,
+          userName: row.user_name,
+          projectId: row.project_id,
+          projectName: row.project_name,
+          taskId: row.task_id,
+          taskName: row.task_name,
+          clientId: row.client_id,
+          clientName: row.client_name,
+          source: row.source,
+          note: row.note,
+        })),
+        // 0013 carries `count(*) over ()` through the `returns table`, so the
+        // pre-LIMIT size of the whole filtered set is repeated identically on
+        // every row and there is nowhere else to read it from.
+        //
+        // **Zero rows therefore means zero count, and that is only true of the
+        // page it was read from.** At offset 0 an empty page really is an empty
+        // set; at any other offset it means "past the end", which says nothing
+        // about how many entries exist. Nothing here can tell the two apart —
+        // the argument is the caller's, and `getReportEntries` is where the
+        // distinction is handled.
+        totalCount: rows[0]?.total_count ?? 0,
+      },
+    };
+  } catch {
+    // **The one catch in this file that asks *why* before answering**, because
+    // it is the one whose caller may be on its twenty-sixth round trip.
+    //
+    // Almost everything that goes wrong here never reaches this block:
+    // `createClient()` throws when the Supabase environment variables are
+    // missing, and a request that fails in flight does not throw at all —
+    // postgrest-js converts a fetch failure into a `PostgrestError` that the
+    // `if (error)` branch above has already worded. What is left is the narrow
+    // remainder, an aborted request among them, which postgrest-js rethrows.
+    //
+    // Blaming that on configuration would tell an admin who has been running
+    // reports all morning to go and check their environment variables. So the
+    // sentence is chosen from a fact rather than an assumption: if the URL and
+    // key really are absent, nothing was ever going to work and NOT_CONFIGURED
+    // is the whole truth; if they are present, this was a failure in flight and
+    // the honest answer is to try again.
+    const configured = Boolean(
+      process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    );
+
+    return {
+      ok: false,
+      error: configured
+        ? "Could not load those entries. Please try again."
+        : NOT_CONFIGURED,
+    };
+  }
+}
+
+/**
+ * §9.7's list: one page of the entries behind a report, newest first.
+ *
+ * Running entries are included and are the rows with a null `endedAt` — that is
+ * 0013's deliberate departure from 0007's `where ended_at is not null`, and the
+ * reason this view has no total of its own. Anything that needs the range's
+ * figures calls `getReportSummary`, which excludes running entries from the sum
+ * and counts them separately (§9.4).
+ */
+export async function getReportEntries(
+  input: ReportEntriesRequestInput,
+): Promise<ActionResult<ReportEntriesPage>> {
+  const prepared = await prepareEntries(input);
+  if (!prepared.ok) {
+    return prepared;
+  }
+
+  const { page } = prepared.data.request;
+
+  const result = await queryEntries({
+    ...prepared.data.filterArgs,
+    p_limit: ENTRIES_PER_PAGE,
+    p_offset: (page - 1) * ENTRIES_PER_PAGE,
+  });
+  if (!result.ok) {
+    return result;
+  }
+
+  // **An empty page that is not the first one is a page past the end, and it
+  // cannot be reported as an empty range.**
+  //
+  // The count rides on the rows (0013 carries `count(*) over ()` through the
+  // `returns table`), so a page with no rows carries no count either, and
+  // `queryEntries` can only answer 0. That is right at offset 0 and wrong
+  // everywhere else — and wrong in a way that compounds: 0 makes the pagination
+  // control disappear, so there is no "previous" link back to the data; it makes
+  // the empty state say "nothing was started in this range" about a range that
+  // holds hundreds of entries; and it disables the CSV of an export that ignores
+  // the page entirely and would have written every one of them. A stale
+  // bookmark, or a range that shrank since the link was shared, is enough to
+  // reach it.
+  //
+  // Falling back to the first page rather than to the *last* one is deliberate.
+  // Both need this same extra round trip, but the last page needs the count
+  // before it can be asked for, so it costs one more; and landing on page 1 of a
+  // report is a place a reader recognises, where landing on page 4 of 4 with no
+  // memory of having asked for a page is not. The page number in the returned
+  // data — not the one in the URL — is what the pagination control renders, so
+  // every link on screen agrees with what is under it.
+  if (result.data.rows.length === 0 && page > 1) {
+    const firstPage = await queryEntries({
+      ...prepared.data.filterArgs,
+      p_limit: ENTRIES_PER_PAGE,
+      p_offset: 0,
+    });
+    if (!firstPage.ok) {
+      return firstPage;
+    }
+
+    return {
+      ok: true,
+      data: {
+        rows: firstPage.data.rows,
+        totalCount: firstPage.data.totalCount,
+        page: 1,
+        perPage: ENTRIES_PER_PAGE,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      rows: result.data.rows,
+      totalCount: result.data.totalCount,
+      page,
+      perPage: ENTRIES_PER_PAGE,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // §9.6 — CSV export
 // ---------------------------------------------------------------------------
 
@@ -604,6 +945,157 @@ export async function exportReportCsv(
     data: {
       filename: reportCsvFilename(grouping, filters.from, filters.to),
       csv: csvForReport(result.data),
+    },
+  };
+}
+
+/**
+ * How many entries an export reads per round trip.
+ *
+ * 200 is 0013's hard clamp, not a preference: `least(greatest(p_limit, 1), 200)`
+ * silently caps anything larger, so asking for 1000 would fetch 200 and advance
+ * the offset by 1000, skipping four rows in five. The loop below detects the end
+ * of the data by a short page, which only works while this number is exactly the
+ * limit the function will honour.
+ */
+const EXPORT_PAGE_SIZE = 200;
+
+/**
+ * §9.6's cap on a detail export, in entries.
+ *
+ * Checked **up front from `total_count`**, before any page but the first is
+ * fetched, rather than discovered by counting rows on the way. The difference
+ * matters: a limit discovered halfway through leaves a caller holding a
+ * half-written file and a choice between truncating it and throwing the work
+ * away, and the first of those is the one outcome worth refusing over. A
+ * timesheet that silently stops at some row is not a smaller timesheet, it is a
+ * wrong one — nothing in the file says it is incomplete, and the person
+ * reconciling it against the summary header sees hours that have gone missing.
+ * So the answer is a sentence asking for a narrower range, which is a request
+ * the caller can act on.
+ */
+const MAX_EXPORT_ENTRIES = 5000;
+
+/**
+ * A ceiling on the loop itself, independent of the count check above.
+ *
+ * `total_count` comes from the database and the check above trusts it; this does
+ * not. If a page ever came back full without the offset advancing past the end —
+ * a clamp changing, a count disagreeing with the rows beside it — an
+ * unconditional `while` would fetch forever. `+ 1` allows the extra empty page a
+ * result of exactly `MAX_EXPORT_ENTRIES` rows needs to prove it has ended.
+ */
+const MAX_EXPORT_PAGES = Math.ceil(MAX_EXPORT_ENTRIES / EXPORT_PAGE_SIZE) + 1;
+
+const TOO_MANY_ENTRIES =
+  "That range has more entries than one file can hold. Narrow the date range.";
+
+/**
+ * §9.7's detail view as an RFC 4180 document — **the whole range, never the page
+ * on screen** (§9.6).
+ *
+ * `page` is therefore ignored. A file that matched the pagination would be a
+ * silent truncation dressed as a download: the CSV has no page indicator, no
+ * "showing 50 of 312", and nothing else in it contradicts the range in its own
+ * filename. `MAX_EXPORT_ENTRIES` is what stops that being unbounded, and it
+ * refuses rather than trims.
+ *
+ * **The one real caveat, stated because it cannot be designed away here.** The
+ * pages are separate statements, so an entry that starts or stops between two of
+ * them shifts the window every later page is measured against: a timer stopping
+ * does not move a row, but a *new* entry does — it sorts to the very front and
+ * pushes everything down by one, so the row at a page seam is read twice. The
+ * bound on the damage comes from the ordering being total (`started_at desc,
+ * id desc`, with the id tiebreak 0013 insists on): the effect is confined to one
+ * row duplicated or missed at a seam, never a reshuffled file. A serialisable
+ * transaction would close it, and is not worth the cost for a CSV of a range
+ * that is almost always already past — and for a range that includes right now,
+ * the entries most likely to move are the running ones, which carry no duration
+ * and so cannot double-count any hours.
+ *
+ * Scoping is `prepare`'s, exactly as for an aggregate export: an employee
+ * exporting with a colleague's `userId` gets their own entries (§9.2).
+ */
+export async function exportReportEntriesCsv(
+  input: ReportEntriesRequestInput,
+): Promise<ActionResult<{ filename: string; csv: string }>> {
+  const prepared = await prepareEntries(input);
+  if (!prepared.ok) {
+    return prepared;
+  }
+
+  const { from, to } = prepared.data.request;
+  const rows: ReportEntryRow[] = [];
+  let reachedTheEnd = false;
+
+  for (let index = 0; index < MAX_EXPORT_PAGES; index += 1) {
+    // Sequential on purpose: the offsets are only known to be worth fetching
+    // because the previous page came back full, and firing them in parallel
+    // would ask the database for up to 5000 rows in twenty-five simultaneous
+    // statements to serve one download.
+    const page = await queryEntries({
+      ...prepared.data.filterArgs,
+      p_limit: EXPORT_PAGE_SIZE,
+      p_offset: index * EXPORT_PAGE_SIZE,
+    });
+    if (!page.ok) {
+      return page;
+    }
+
+    if (index === 0) {
+      if (page.data.totalCount > MAX_EXPORT_ENTRIES) {
+        return { ok: false, error: TOO_MANY_ENTRIES };
+      }
+
+      // **The one invariant this loop cannot survive being wrong about**, and
+      // the reason it is checked rather than trusted: `EXPORT_PAGE_SIZE` must
+      // equal the ceiling in 0013's `least(greatest(coalesce(p_limit, 50), 1),
+      // 200)`. If that ceiling is ever lowered without this constant following
+      // it, every request asks for 200, receives fewer, and advances the offset
+      // by 200 anyway — writing one row in two to the file, with no error and
+      // nothing in the CSV to say so. Two paragraphs in two files are not enough
+      // to hold that together, and `pnpm test` cannot reach Postgres to catch it
+      // (§12.1), so it is caught here instead: a first page that came back short
+      // while the count says there is more can only mean the clamp moved.
+      if (
+        page.data.rows.length < EXPORT_PAGE_SIZE &&
+        page.data.totalCount > page.data.rows.length
+      ) {
+        return {
+          ok: false,
+          error: "Could not export those entries. Please try again.",
+        };
+      }
+    }
+
+    rows.push(...page.data.rows);
+
+    // A short page is the end of the data. Testing the row count rather than
+    // `rows.length >= totalCount` keeps this correct when the set has shrunk
+    // mid-export, where the count read on page one is already stale.
+    if (page.data.rows.length < EXPORT_PAGE_SIZE) {
+      reachedTheEnd = true;
+      break;
+    }
+  }
+
+  // Falling out of the loop with a full last page means the data outran
+  // `MAX_EXPORT_PAGES`. The up-front `total_count` check should have refused
+  // this already, but that count was read before the first of up to
+  // `MAX_EXPORT_PAGES` round trips and is stale by the last: a range ending
+  // today can gain entries while the export is being assembled. Returning here
+  // would produce exactly the file `MAX_EXPORT_ENTRIES` exists to refuse — one
+  // that stops mid-data with nothing in it saying so — so the same refusal is
+  // repeated on the way out, where the reason is no longer a prediction.
+  if (!reachedTheEnd) {
+    return { ok: false, error: TOO_MANY_ENTRIES };
+  }
+
+  return {
+    ok: true,
+    data: {
+      filename: reportEntriesCsvFilename(from, to),
+      csv: csvForReportEntries(rows),
     },
   };
 }

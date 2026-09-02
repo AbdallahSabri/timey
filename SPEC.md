@@ -567,6 +567,42 @@ Path B — invitee:   receives link → sign up or sign in → profile bound to 
 
 **9.6 CSV export** of any report view. **[OPEN]** — is CSV enough for v1, or are PDF timesheets needed for signature?
 
+Both shapes go through `GET /api/reports/export`, distinguished by the same `view`
+parameter §9.7 introduces: an aggregate view exports its grouping's columns, the detail
+view exports one line per entry. The detail file is the **whole range, never the page on
+screen** — a timesheet that silently stopped at row 50 would be worse than no file — and
+is therefore capped at 5000 entries, above which the export is refused with a sentence
+asking for a narrower range rather than truncated.
+
+**9.7 [R] The detail view.** Alongside §9.3's aggregate groupings, `/reports` offers one
+entry-level view: every time entry in the range, one row each, newest first. It answers
+the question a total cannot — *which* punches make up these hours — and it is the shape an
+attendance log is read in.
+
+It is deliberately **not** a seventh grouping, and the distinction is not cosmetic:
+
+- **It aggregates nothing.** §9.1's "aggregate SQL" rule is about not summing in Node; a
+  row-level list has nothing to sum. §9.5 is likewise silent here — each row carries the
+  `duration_seconds` the database generated, formatted once at the edge.
+- **Running entries are shown, and marked.** Every other view obeys §9.4 by excluding
+  them from a total; this one has no total to protect, and §5.4's "shown separately as in
+  progress where useful" is exactly this case. A running row carries no end time and no
+  duration, because `duration_seconds` is NULL until the entry is stopped.
+- **It is paginated.** A 366-day range of company-wide entries is unbounded in a way no
+  §9.3 grouping is (a by-day report has at most 366 lines). Ordering is
+  `started_at DESC, id DESC` — the id makes the order total, so paging cannot show or skip
+  a row when two entries share a start instant.
+- **It has no footer total,** and this is what keeps §12.2's "report totals equal the sum
+  of their own visible line items" true rather than merely unenforced. A page of 50 rows
+  out of 312 cannot carry an honest total of anything. The range figures live in the
+  summary header above it, which is `report_summary` — closed entries only, running
+  counted separately — and says so.
+
+Everything else in §9.2 applies unchanged: the same date range, the same four filters, the
+same scoping. An employee filtering by a colleague gets their own rows, because
+`time_entries` SELECT is the boundary and the action replaces the parameter rather than
+forwarding it.
+
 ---
 
 ## 10. Open Decisions
@@ -647,6 +683,9 @@ Run after any migration touching RLS or `time_entries`. Two browser profiles, tw
 - [ ] A 22:00→03:00 entry appears entirely on the start day, in company timezone
 - [ ] A running timer contributes zero to report totals
 - [ ] Report totals equal the sum of their own visible line items
+- [ ] The detail view shows a running entry, marked, with no end time and no duration
+- [ ] The detail view's CSV contains every row in the range, not just the page on screen
+- [ ] Paging the detail view neither repeats nor skips a row across page boundaries
 
 ### 12.3 shadcn primitives
 

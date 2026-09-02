@@ -191,6 +191,85 @@ export const reportRequestSchema = z
     },
   );
 
+/**
+ * Which of the two report shapes `/reports` is showing: §9.3's aggregate
+ * groupings, or §9.7's entry-level list.
+ *
+ * **Not folded into `reportGroupingSchema`, and the separation is the point.**
+ * A grouping names a `GROUP BY`; every member of that enum maps to a function
+ * that aggregates. The detail view aggregates nothing — it has different
+ * columns, different row semantics (a running entry appears in it, and in
+ * nothing else), and no total of its own. Adding a seventh member would make
+ * `csvForReport`'s and `describeReport`'s exhaustive switches claim to handle a
+ * row shape they cannot produce.
+ *
+ * The two are orthogonal, so both live in the URL at once: switching to the
+ * detail view and back returns you to the grouping you left.
+ */
+export const reportViewSchema = z.enum(
+  ["summary", "detail"],
+  "That isn't a report view this app can produce.",
+);
+
+export type ReportView = z.infer<typeof reportViewSchema>;
+
+/**
+ * Rows per page in §9.7's detail view.
+ *
+ * Matches `report_entries`' own `p_limit` default, so the two cannot silently
+ * disagree about what "page 2" means. Well under the function's hard clamp of
+ * 200, which is itself well under PostgREST's `max_rows = 1000`.
+ */
+export const ENTRIES_PER_PAGE = 50;
+
+/**
+ * The largest page number this schema will accept.
+ *
+ * At `ENTRIES_PER_PAGE` rows a page, this is an offset of half a million — far
+ * past any real range, and the point is only that a hand-typed `?page=1e9`
+ * becomes a refusal rather than an `OFFSET` the database has to count its way
+ * to. A page past the end of a real result is *not* an error: it renders an
+ * empty list with working "previous" navigation, the same as any paginated
+ * list.
+ */
+const MAX_PAGE = 10_000;
+
+/**
+ * §9.7's request: the same range and filters every other report takes, plus
+ * which page of the entry list is wanted.
+ *
+ * `page`, not `offset`, because the page number is what the URL carries and
+ * what the pagination control reasons about; the offset is arithmetic the
+ * action does once. Built from `reportFilterShape` and re-stating the same two
+ * refinements for the same reason `reportRequestSchema` does — a refined schema
+ * is no longer an object schema and cannot be extended.
+ */
+export const reportEntriesRequestSchema = z
+  .object({
+    ...reportFilterShape,
+    // Coerced because this arrives from a query string, where every value is a
+    // string. `.catch()` rather than a refusal: unlike a date, a malformed page
+    // number has an obviously correct reading — the first one — and refusing
+    // the whole report over it would be a worse answer than showing page 1.
+    page: z.coerce.number().int().min(1).max(MAX_PAGE).catch(1),
+  })
+  .refine((value) => value.from <= value.to, {
+    error: "The start date has to come before the end date.",
+    path: ["to"],
+  })
+  .refine(
+    (value) => inclusiveDayCount(value.from, value.to) <= MAX_REPORT_DAYS,
+    {
+      error: `A report can cover at most ${MAX_REPORT_DAYS} days. Narrow the date range.`,
+      path: ["to"],
+    },
+  );
+
+export type ReportEntriesRequestInput = z.input<
+  typeof reportEntriesRequestSchema
+>;
+export type ReportEntriesRequest = z.output<typeof reportEntriesRequestSchema>;
+
 /** What a caller passes in: ids may be omitted, blank, or null. */
 export type ReportFiltersInput = z.input<typeof reportFiltersSchema>;
 

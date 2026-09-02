@@ -890,6 +890,36 @@ export type Database = {
           user_name: string;
         }[];
       };
+      report_entries: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_limit?: number;
+          p_offset?: number;
+          p_project_id?: string;
+          p_task_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          client_id: string;
+          client_name: string;
+          day: string;
+          duration_seconds: number;
+          entry_id: string;
+          local_ended_at: string;
+          local_started_at: string;
+          note: string;
+          project_id: string;
+          project_name: string;
+          source: Database["public"]["Enums"]["entry_source"];
+          task_id: string;
+          task_name: string;
+          total_count: number;
+          user_id: string;
+          user_name: string;
+        }[];
+      };
       report_summary: {
         Args: {
           p_client_id?: string;

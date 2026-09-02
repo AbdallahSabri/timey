@@ -62,7 +62,6 @@ export default async function ClientsPage({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">Clients</h1>
-        <pre>{JSON.stringify(currentMember, null, 2)}</pre>
         <p className="text-muted-foreground text-sm">
           Who the work is for. A project without a client is internal.
         </p>
