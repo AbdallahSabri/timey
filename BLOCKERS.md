@@ -8,6 +8,32 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-16 · §12.2's "totals equal their own visible line items" is scoped to aggregate views, 2026-09-02
+
+**`SPEC.md` §9.7 (new), §12.2.** The detail view added to `/reports` lists one row per time
+entry over a range, and a 366-day company-wide range is unbounded in a way no §9.3 grouping
+is — so it pages. That collides head-on with §12.2's checklist line "report totals equal the
+sum of their own visible line items", which is the rule that makes a timesheet trustworthy:
+a footer disagreeing with the rows above it destroys confidence faster than a wrong number.
+
+Three options were considered. **Sum only the page** — a footer reading 6:40 above 50 of 312
+rows, technically consistent and completely useless. **Sum the whole range in the footer** —
+the literal violation, and the exact failure the rule names. **No footer at all**, taken:
+the range figures already exist one card higher up, in `report_summary`, which is the
+sanctioned source of a range total (closed entries only, running counted separately, §9.4),
+and the table carries a caption saying so.
+
+So the rule is not weakened and not excepted — it is scoped. It governs a view that presents
+a total. The detail view presents none, and §9.7 says that in the spec rather than leaving it
+as an absence someone later "fixes" by adding a footer.
+
+The second consequence worth recording: this view **includes running entries**, the only
+report surface that does. Nothing there sums, so §9.4 is untouched — but `report_entries` is
+now the one function in the reporting surface without `where ended_at is not null`, and any
+future caller that sums its rows must exclude the NULL durations itself. The migration says
+this in its header; it is repeated here because the next person to write a total over these
+rows will read this file, not that one.
+
 ### D-15 · Production invitations broke on a code-ahead-of-schema deploy, 2026-08-29
 
 **`README.md` §"Pointing at a hosted project".** Every invitation in production failed with "Could not send the invitation. Please try again." for every address.

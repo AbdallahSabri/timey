@@ -13,6 +13,7 @@
 import type {
   ReportClientRow,
   ReportDayRow,
+  ReportEntryRow,
   ReportProjectRow,
   ReportResult,
   ReportTaskRow,
@@ -59,6 +60,14 @@ function durationColumns<
 //
 // The on-screen wording is build-ui's call and can be as explicit as it likes;
 // a spreadsheet has no tooltip to qualify a guess with.
+//
+// §9.7's entry table below adds a SECOND meaning for a blank cell, and that is
+// why it carries a column the six aggregate tables do not. In `entryColumns` an
+// empty End or Duration does not mean "unreadable" — it means the timer is still
+// running (§9.4, 0013's DEPARTURE 1), which is a fact about the entry rather
+// than about the reader. The two are indistinguishable by emptiness alone, so
+// the reading is made explicit in its own `Status` column instead of being
+// inferred from which cells happen to be blank.
 // ---------------------------------------------------------------------------
 
 const dayColumns: CsvColumn<ReportDayRow>[] = [
@@ -103,6 +112,78 @@ const userProjectColumns: CsvColumn<ReportUserProjectRow>[] = [
   ...durationColumns<ReportUserProjectRow>(),
 ];
 
+/** The `Status` cell on a running entry. Empty on a closed one — see below. */
+const IN_PROGRESS = "In progress";
+
+/** `"2026-09-01T09:02:11"` → `"09:02"`. */
+function clockOf(localTimestamp: string): string {
+  // A fixed-width slice rather than a Date: the value is already a company wall
+  // clock with no offset (0013's DEPARTURE 2), and `new Date(...)` would read it
+  // in whatever zone the server happens to run in and hand back a different
+  // time. Seconds are dropped because a timesheet is read to the minute; the
+  // full instant is not lost, since `Duration (seconds)` carries the exact
+  // length the database computed.
+  return localTimestamp.slice(11, 16);
+}
+
+/**
+ * §9.7's entry table: one line per time entry, in the order the detail view
+ * reads.
+ *
+ * **Why this does not reuse `durationColumns()`.** That helper is generic over
+ * `{ entryCount: number; totalSeconds: number }` — an aggregate shape — and an
+ * entry row has neither field. It is one entry, so a count of entries would be
+ * the constant 1, and its duration is `durationSeconds`, which is nullable in a
+ * way no total is: null means running, not zero. The two duration columns are
+ * still both here, for §9.5's reason unchanged — the integer is what anyone
+ * re-summing the file must use, the `H:MM:SS` is what an admin reconciles
+ * against the screen.
+ *
+ * **A running row leaves End, Duration (seconds) and Duration all empty** rather
+ * than writing 0, and `Status` says "In progress" so that emptiness cannot be
+ * read as a missing label. Writing 0 would put a completed zero-length entry in
+ * the file, which sums silently and wrongly (0013's DEPARTURE 1 says this at
+ * length); `Status` is left empty on a closed row for the same reason no other
+ * cell in this file invents a placeholder — a spreadsheet filter on the blank
+ * cells of one column is how someone finds every running entry, and a word like
+ * "Complete" in the other rows makes that column two words rather than one flag.
+ */
+const entryColumns: CsvColumn<ReportEntryRow>[] = [
+  // The company-local day (§6.1), which for a shift crossing midnight is the day
+  // it STARTED (§5.5) — the row is not split, so this can differ from the
+  // calendar day the End column's clock belongs to.
+  { header: "Date", value: (row) => row.day },
+  { header: "User", value: (row) => row.userName },
+  { header: "Start", value: (row) => clockOf(row.startedAt) },
+  {
+    header: "End",
+    value: (row) => (row.endedAt === null ? null : clockOf(row.endedAt)),
+  },
+  {
+    header: "Status",
+    value: (row) => (row.endedAt === null ? IN_PROGRESS : null),
+  },
+  { header: "Duration (seconds)", value: (row) => row.durationSeconds },
+  {
+    header: "Duration",
+    value: (row) =>
+      row.durationSeconds === null
+        ? null
+        : formatSecondsHms(row.durationSeconds),
+  },
+  { header: "Client", value: (row) => row.clientName },
+  { header: "Project", value: (row) => row.projectName },
+  { header: "Task", value: (row) => row.taskName },
+  // §3.7's enum, written as the database's own token ("timer" / "manual")
+  // rather than a prettified label: this column exists to be filtered on, and a
+  // translated word would not match what any other export or query calls it.
+  { header: "Source", value: (row) => row.source },
+  // Last because it is the only free-text column — a note carrying a comma, a
+  // quote or a newline is quoted by `csvField`, and a long one at the end of the
+  // record is the one place that cannot push another column out of view.
+  { header: "Note", value: (row) => row.note },
+];
+
 /**
  * A finished report → a CSV document.
  *
@@ -143,4 +224,35 @@ export function reportCsvFilename(
   to: string,
 ): string {
   return `timey-by-${grouping}-${from}-to-${to}.csv`;
+}
+
+/**
+ * §9.7's rows → a CSV document.
+ *
+ * A plain function rather than an arm of `csvForReport`'s switch: that switch is
+ * closed over `ReportResult`, whose six variants all aggregate, and the detail
+ * view is deliberately not a seventh grouping (§9.7). Keeping it out is what
+ * lets the switch stay exhaustive without a default arm.
+ */
+export function csvForReportEntries(rows: ReportEntryRow[]): string {
+  return toCsv(entryColumns, rows);
+}
+
+/**
+ * The detail download's filename, e.g.
+ * `timey-entries-2026-08-01-to-2026-08-31.csv`.
+ *
+ * `entries` rather than a grouping name, because there is no grouping — the file
+ * is a list, and the name should not suggest it has been summarised.
+ *
+ * The same safety argument as `reportCsvFilename` applies unchanged and for the
+ * same reason: every part is either a literal or a `YYYY-MM-DD` that has already
+ * been through `reportEntriesRequestSchema`'s `reportDaySchema`, so nothing here
+ * can introduce a quote, a semicolon or a CRLF into the `Content-Disposition`
+ * header that carries it. That is a property of the validated input rather than
+ * of this function, which is why the caller must pass validated values and never
+ * raw query parameters.
+ */
+export function reportEntriesCsvFilename(from: string, to: string): string {
+  return `timey-entries-${from}-to-${to}.csv`;
 }

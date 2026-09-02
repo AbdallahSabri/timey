@@ -93,6 +93,15 @@ function FilterSelect({
  * survive a middle-click and a bookmark, which is most of the point of putting
  * the state in the URL.
  *
+ * **That grouping row is absent on the detail view**, because a grouping *is* a
+ * `GROUP BY` and §9.7's entry list aggregates nothing — every row is one
+ * `time_entries` row. Offering "by client" there would be a control with no
+ * meaning to give it, and picking one would have to either do nothing or
+ * silently throw the user back to the summary. Everything below it is shared:
+ * the range and the four filters are the same `WHERE` clause in both shapes, so
+ * they render identically and a filter set while grouping by project is still
+ * set after switching to Detailed.
+ *
  * **The person filter renders for an admin only** (§9.2: "admins may filter by
  * any user; employees are hard-scoped to themselves by RLS regardless of what
  * the UI sends"). That is not how the scoping is enforced — `getReport*`
@@ -157,33 +166,38 @@ export function ReportControls({
   return (
     <div className="flex flex-col gap-4" aria-busy={pending}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav
-          aria-label="Group the report by"
-          className="bg-muted inline-flex flex-wrap gap-0.5 rounded-lg p-0.5"
-        >
-          {REPORT_GROUPINGS.map((grouping) => {
-            const active = grouping.value === query.grouping;
+        {query.view === "summary" ? (
+          <nav
+            aria-label="Group the report by"
+            className="bg-muted inline-flex flex-wrap gap-0.5 rounded-lg p-0.5"
+          >
+            {REPORT_GROUPINGS.map((grouping) => {
+              const active = grouping.value === query.grouping;
 
-            return (
-              <Link
-                key={grouping.value}
-                href={reportHref(query, { grouping: grouping.value })}
-                aria-current={active ? "page" : undefined}
-                scroll={false}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-sm transition-colors",
-                  active
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {grouping.label}
-              </Link>
-            );
-          })}
-        </nav>
+              return (
+                <Link
+                  key={grouping.value}
+                  href={reportHref(query, { grouping: grouping.value })}
+                  aria-current={active ? "page" : undefined}
+                  scroll={false}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-sm transition-colors",
+                    active
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {grouping.label}
+                </Link>
+              );
+            })}
+          </nav>
+        ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
+        {/* `ml-auto` rather than relying on `justify-between`, which has nothing
+            to push against once the grouping row is gone and would leave the
+            date range hard against the left edge under the view switcher. */}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <DateRangePicker
             from={query.from}
             to={query.to}
