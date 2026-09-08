@@ -5,7 +5,7 @@ Time tracking for small teams. People start and stop a timer — or enter hours 
 **In scope:** time capture, project/task structure, team membership, missed-punch corrections, reporting, CSV export.
 **Out of scope by design (not "later"):** billing, rates, invoicing, payroll export, screenshots, activity monitoring, GPS, idle detection.
 
-All eight build phases are complete — the app is functional end to end against a real Supabase project.
+All nine build phases are complete — the app is functional end to end against a real Supabase project.
 
 ## The documents
 
@@ -14,7 +14,7 @@ This repo is spec-driven; the prose is load-bearing, not decoration.
 | File | What it holds |
 | --- | --- |
 | `SPEC.md` | The behavioral contract — numbered rulings on tenancy, RLS, timer semantics, corrections, reporting. If the code disagrees, the spec wins or the spec changes. |
-| `PLAN.md` | Phase ordering (0–8) and the exit criteria each phase had to clear. |
+| `PLAN.md` | Phase ordering (0–9) and the exit criteria each phase had to clear. |
 | `BLOCKERS.md` | Decisions taken, workarounds recorded, and known non-blocking issues. Newest first. |
 | `CLAUDE.md` | Stack rules, the gate, and the `.claude/agents/` routing table for working on this repo with Claude Code. |
 
@@ -66,7 +66,7 @@ Get the Supabase two from your project's **Settings → API**. The last three ar
 
 ## Database
 
-Ten migrations, applied in order. Every tenant table carries `company_id` directly so RLS policies are single-column equality checks with no joins (`SPEC.md` §2.1).
+Fourteen migrations, applied in order. Every tenant table carries `company_id` directly so RLS policies are single-column equality checks with no joins (`SPEC.md` §2.1).
 
 | Migration | What it lands |
 | --- | --- |
@@ -80,32 +80,100 @@ Ten migrations, applied in order. Every tenant table carries `company_id` direct
 | `0008_deactivation_scope` | Deactivated members lose access everywhere (one helper, ten tables) |
 | `0009_orphaned_running_entries` | An admin may close — not reattribute — a running entry whose owner is inactive |
 | `0010_admin_direct_entry_paths` | Direct admin create/delete, so a single-admin company isn't stuck behind the no-self-approval rule |
+| `0011_invite_existing_member_guard` | `email_is_company_member()` — refuse an invitation to somebody already on the team |
+| `0012_pending_invitation_guard` | `pending_invitation_for_me()` — the onboarding-vs-invitation branch |
+| `0013_report_entries` | `report_entries()` — the paginated detail view behind a total |
+| `0014_member_schedules` | Expected hours per assignment (`expected_daily_seconds`, `working_days`) and the two attendance functions (`SPEC.md` §9.8) |
 
-Regenerate types after any schema change:
+Regenerate types after any schema change — `pnpm db:types` wraps the local case, including the Prettier
+pass the raw CLI output needs to survive `pnpm format:check`:
 
 ```bash
-pnpm exec supabase gen types typescript --local > src/types/supabase.ts
+pnpm db:types                  # local: generate + format, in one step
 # or, against a hosted project:
-pnpm dlx supabase gen types typescript --project-id <project-id> > src/types/supabase.ts
+pnpm exec supabase gen types typescript --project-id <ref> > src/types/supabase.ts
+pnpm prettier --write src/types/supabase.ts
 ```
+
+The CLI emits semicolon-free output that the repo's Prettier config rejects, so a bare `gen types` leaves the
+gate red. That is the only reason the script exists.
 
 ### Pointing at a hosted project
 
 1. Create a project at [supabase.com](https://supabase.com) (or a self-hosted instance).
-2. `supabase link --project-ref <ref>` then `supabase db push` to apply `supabase/migrations/`.
-3. Copy the Project URL and anon key from **Settings → API** into `.env.local` and into your host's env config (see "Deploy on Coolify").
-4. Regenerate `src/types/supabase.ts` against the real schema.
+2. `pnpm exec supabase link --project-ref <ref>` — the ref is the subdomain of your Project URL,
+   `https://<ref>.supabase.co`. You will need the database password (resettable under **Settings → Database**).
+3. Publish the schema — see the guide immediately below.
+4. Copy the Project URL and anon key from **Settings → API** into `.env.local` and into your host's env config
+   (see "Deploy on Coolify").
+5. Regenerate `src/types/supabase.ts` against the real schema.
 
-**Push migrations *before* deploying the code that calls them.** The two are never atomic: the host redeploys on a push to the branch, while `supabase db push` is a separate manual step. Deploy the code first and any action calling a not-yet-created function gets PostgREST's `PGRST202`, which surfaces as that action's generic failure message — it has happened, and it took invitations down for every address (`BLOCKERS.md` D-15). The gate cannot catch this: `pnpm build` never talks to the production database.
+Use `pnpm exec` rather than a global `supabase`: the CLI is a devDependency, so this runs the version the repo
+was built against instead of whatever happens to be on your PATH.
 
-The safe order for any change touching `supabase/migrations/**`:
+## Publishing migrations to production
+
+Migrations are **never** applied by deploying. Merging a branch ships code; `supabase db push` ships schema, and
+nothing connects the two. Doing them in the wrong order has taken this product down once already — see the
+warning below, which is the reason this section exists.
+
+### The procedure
 
 ```bash
-pnpm exec supabase db push     # 1. schema first, additive migrations are safe ahead of the code
-git push                       # 2. then the code that uses it
+# 1. See what production is actually missing. Read-only; changes nothing.
+pnpm exec supabase migration list --linked
+
+# 2. Apply every pending migration, in order.
+pnpm exec supabase db push
+
+# 3. Confirm. The Local and Remote columns must now match on every row.
+pnpm exec supabase migration list --linked
+
+# 4. Only now deploy the code that uses the new schema.
+git push
 ```
 
-`pnpm exec supabase migration list` prints local versus remote, and is the quickest way to check whether a deployed environment is behind.
+Step 1 is not optional politeness. `db push` applies **everything** pending, not just the migration you have in
+mind, so it is the difference between a one-migration push and discovering that four earlier ones never landed.
+
+### Push the schema before the code that calls it
+
+The two halves are never atomic: the host redeploys on a push to the branch, while `db push` is a separate manual
+step you run yourself. Deploy the code first and any action calling a not-yet-created function gets PostgREST's
+`PGRST202`, which surfaces as that action's generic failure message rather than as anything diagnosable.
+
+That is not hypothetical. `0011`'s function was called by code that shipped in one PR while the migration shipped
+in another, and every invitation in production failed — for every address — until the migration was pushed
+(`BLOCKERS.md` D-15). The entry's own conclusion is worth keeping in mind: *merging code has never applied a
+migration.*
+
+**The gate cannot catch this.** `pnpm build` never talks to the production database, and `pnpm test` runs on
+jsdom and cannot see Postgres at all (`SPEC.md` §12.1). No amount of green proves production has the schema.
+
+### Additive migrations are safe ahead of the code
+
+A migration that only **adds** things — new tables, new columns with defaults, new functions, no policy changes —
+can be pushed before its code merges, with no window in which production is broken in either direction: the
+running code simply ignores what it does not know about. `0014_member_schedules` is exactly this shape.
+
+A migration that **changes or removes** something reachable by the currently-deployed code has no such window,
+and needs to be split into an additive step now and a removal step after the code is live.
+
+### After pushing
+
+Regenerate the types against the real schema and confirm they match what is committed:
+
+```bash
+pnpm exec supabase gen types typescript --project-id <ref> > src/types/supabase.ts
+pnpm prettier --write src/types/supabase.ts
+git diff --stat src/types/supabase.ts    # empty means production agrees with the committed types
+```
+
+A non-empty diff means production's schema and this repo's types disagree — investigate before deploying, rather
+than committing the difference away.
+
+Then walk the `SPEC.md` §12.2 checks that touch what you changed. Anything under `supabase/migrations/**` alters
+RLS-adjacent surface, and the automated suite verifies none of it.
 
 ## Routes
 
@@ -170,6 +238,10 @@ supabase/templates/   confirmation email override
 | `pnpm format` / `pnpm format:check` | Prettier |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm test` / `pnpm test:watch` | Vitest |
+| `pnpm db:new <name>` | Scaffold a migration under `supabase/migrations/` |
+| `pnpm db:status` | Local versus applied migrations. Add `--linked` via `pnpm exec` for production |
+| `pnpm db:migrate` | Apply pending migrations to the **local** stack |
+| `pnpm db:types` | Regenerate `src/types/supabase.ts` from the local schema, Prettier-formatted |
 
 ### The gate
 

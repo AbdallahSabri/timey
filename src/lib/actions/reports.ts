@@ -1,5 +1,24 @@
 "use server";
 
+// §9.8's union merge, and the row shapes it takes. **The import direction is
+// backwards on purpose and is worth one paragraph**: `lib/` importing from
+// `components/` is normally the wrong way round, and the module is neither a
+// component nor React-aware — it is pure, has no `next/*` or Supabase import,
+// and lives beside the report rendering because that is where its unit tests
+// and its siblings (`report-days.ts`, `report-rows.ts`) already are. Putting a
+// second copy of the merge here to avoid the arrow would be the one thing worse
+// than the arrow: two definitions of whether an expected-only person appears in
+// an attendance report, in the two layers most likely to be read separately.
+// If it is ever moved, `src/lib/reports/` is where it belongs and this is the
+// only import that has to follow it.
+import {
+  mergeExpectedByUser,
+  mergeExpectedByUserProject,
+  type ActualUserProjectTotals,
+  type ActualUserTotals,
+  type ExpectedForUser,
+  type ExpectedForUserProject,
+} from "@/components/reports/report-expected";
 // Type-only, so it is erased at build time and does not pull another
 // "use server" module into this one's graph.
 import type { ActionResult } from "@/lib/actions/auth";
@@ -71,12 +90,28 @@ export type ReportDayRow = {
   totalSeconds: number;
 };
 
-/** §9.3 "by user". `userName` is null when the profile row is unreadable. */
+/**
+ * §9.3 "by user". `userName` is null when the profile row is unreadable.
+ *
+ * `expectedSeconds` is §9.8's other half, and **its null means something
+ * completely different from every other null in this file.** Elsewhere null is
+ * "the caller cannot read that label". Here it is "expected is not a meaningful
+ * quantity for this report", which has exactly one cause: a task filter
+ * (§9.8.2). Schedules are per *project* (§3.6.3), so the hours a person owes
+ * against one task is not a number that exists — and rendering it as `0` would
+ * be the stronger, falser claim that nothing was asked of them.
+ *
+ * A person with no schedule at all is therefore `0`, never null: nobody asked
+ * anything of them, which is a real answer. The distinction is decided in
+ * `getReportByUser` before the merge runs, and the merge itself only ever
+ * produces numbers.
+ */
 export type ReportUserRow = {
   userId: string;
   userName: string | null;
   entryCount: number;
   totalSeconds: number;
+  expectedSeconds: number | null;
 };
 
 /**
@@ -118,7 +153,15 @@ export type ReportClientRow = {
   totalSeconds: number;
 };
 
-/** §9.3's user × project cross-tab, "the useful one in practice". */
+/**
+ * §9.3's user × project cross-tab, "the useful one in practice".
+ *
+ * `expectedSeconds` reads exactly as it does on `ReportUserRow`, one level
+ * finer: the key is the (person, project) pair, so somebody can be behind on
+ * one project and ahead on another and both rows say so. That is this view's
+ * reason to exist — a combined per-person figure hides which project the
+ * shortfall is on.
+ */
 export type ReportUserProjectRow = {
   userId: string;
   userName: string | null;
@@ -128,6 +171,7 @@ export type ReportUserProjectRow = {
   clientName: string | null;
   entryCount: number;
   totalSeconds: number;
+  expectedSeconds: number | null;
 };
 
 /**
@@ -139,6 +183,28 @@ export type ReportSummary = {
   entryCount: number;
   totalSeconds: number;
   runningCount: number;
+  /**
+   * §9.8.1's header figure: what this person was expected to work over the
+   * range, in integer seconds. **Non-null only when the report resolves to
+   * exactly one person**, which is two cases and no others:
+   *
+   *   * an employee, always — §9.2 replaces their user filter with their own
+   *     id, so every report they can run is about them;
+   *   * an admin who has set the person filter.
+   *
+   * It is null for a team-wide report, because "expected" summed over a whole
+   * company is a capacity figure nobody asked for and would sit in a header
+   * beside a worked total it does not correspond to line-for-line; the by-user
+   * column serves that reading properly. It is also null under a task filter,
+   * always and regardless of who is asking, for §9.8.2's reason.
+   *
+   * **§9.8.2's other lie applies here more than anywhere**: `report_summary`
+   * excludes running entries from `totalSeconds` (§9.4) while expected counts
+   * today in full, so somebody four hours into an unstopped timer reads as four
+   * hours behind. Any surface that shows both must say so whenever
+   * `runningCount > 0`.
+   */
+  expectedSeconds: number | null;
 };
 
 /**
@@ -265,6 +331,35 @@ type RawUserProjectRow = LabelNullable<
 type RawSummaryRow = Fn["report_summary"]["Returns"][number];
 
 /**
+ * 0014's expected rows, widened for the familiar reason: `user_name` and
+ * `project_name` are LEFT-joined labels, and `RETURNS TABLE` carries no
+ * nullability for the generator to read. The null case is not hypothetical for
+ * either — `project_members` SELECT is company-wide while `projects` SELECT is
+ * admin-or-member (§3.6.1), so an employee reading a colleague's assignment on
+ * a project they are not themselves on gets the seconds and no project name.
+ */
+type RawExpectedUserRow = LabelNullable<
+  Fn["report_expected_by_user"]["Returns"][number],
+  "user_name"
+>;
+
+/**
+ * The same for the cross-tab, with **four** label columns widened rather than
+ * two.
+ *
+ * `client_name` is nullable for the usual §2.3/§3.6.1 reason every label column
+ * in this file is. `client_id` is nullable for a second, unrelated reason:
+ * §3.4 makes `projects.client_id` genuinely nullable, so an internal project
+ * has no client at all. Both nulls arrive as the same absence and neither may
+ * be rendered as a claim that the work was internal — `report-rows.ts` spells
+ * out why "Internal" would be a confident lie about the second kind.
+ */
+type RawExpectedUserProjectRow = LabelNullable<
+  Fn["report_expected_by_user_project"]["Returns"][number],
+  "user_name" | "project_name" | "client_id" | "client_name"
+>;
+
+/**
  * 0013's row, widened for **two different reasons** that happen to need the same
  * correction — worth separating, because only the first is the one the long note
  * at the top of this file describes.
@@ -334,6 +429,16 @@ type ReportEntriesArgs = ReportArgs & {
 };
 
 /**
+ * The same parameters **without `p_task_id`**, which 0014's two functions do not
+ * take.
+ *
+ * Expressed as an `Omit` rather than as its own five-field literal so that a
+ * seventh filter added to `ReportArgs` one day appears here too and has to be
+ * thought about, instead of being silently dropped from every expected figure.
+ */
+type ReportExpectedArgs = Omit<ReportArgs, "p_task_id">;
+
+/**
  * Validate, resolve the caller, and apply §9.2's employee scoping.
  *
  * **The filter drop.** §9.2: "Admins may filter by any user; employees are hard
@@ -398,6 +503,52 @@ async function prepare(
       p_project_id: parsed.data.projectId ?? undefined,
       p_task_id: parsed.data.taskId ?? undefined,
     },
+  };
+}
+
+/**
+ * `prepare`'s arguments as 0014's functions take them, or `null` when expected
+ * hours are not a quantity this report has.
+ *
+ * **Both halves of §9.8.2's task-filter rule live here and only here.** A task
+ * filter makes expected undefined — schedules are per project (§3.6.3), so
+ * there is no such thing as the hours a person owes against one task — and the
+ * functions accordingly take no `p_task_id` to pass it to. Returning null
+ * rather than "the same arguments minus the filter" is what keeps the two from
+ * drifting apart: silently dropping `p_task_id` and calling anyway would return
+ * a project-wide target beside a task-sized actual, which reads as a
+ * catastrophic shortfall and is the exact misreading the parameter's absence
+ * was designed to prevent.
+ *
+ * **`p_user_id` is carried through unchanged, and that is load-bearing.**
+ * `report_expected_by_user` is `SECURITY INVOKER` over
+ * `project_members_select_own_company`, which is **company-wide** (§4.2, §3.6.2)
+ * — unlike `time_entries_select_own_or_admin`, which every one of 0007's and
+ * 0013's functions inherits. So these two RPCs do **not** collapse an employee
+ * to their own row: an employee passing a colleague's id gets the colleague's
+ * expected figure, and an employee passing *nothing* gets the whole company's
+ * schedules summed per person. §9.2's scoping in `prepare` — `const userId =
+ * isAdmin ? parsed.data.userId : member.data.id` — is therefore what makes an
+ * employee's expected figure their own, and there is no RLS behind it to catch
+ * the mistake if it is ever removed. That is the difference between this pair
+ * of functions and every other report in this file.
+ *
+ * (No disclosure is created by that: the same employee can read the same two
+ * columns straight off `project_members` with one PostgREST select, which is
+ * §3.6.3's accepted consequence of putting the schedule on the assignment. It
+ * is a scoping obligation on this layer, not a hole.)
+ */
+function expectedArgsFor(args: ReportArgs): ReportExpectedArgs | null {
+  if (args.p_task_id !== undefined) {
+    return null;
+  }
+
+  return {
+    p_from: args.p_from,
+    p_to: args.p_to,
+    p_user_id: args.p_user_id,
+    p_client_id: args.p_client_id,
+    p_project_id: args.p_project_id,
   };
 }
 
@@ -473,6 +624,146 @@ export async function getReportByDay(
   }
 }
 
+/**
+ * One call to `report_expected_by_user`, mapped.
+ *
+ * Split from the exported action below because `getReportByUser` and
+ * `getReportSummary` both need these rows *alongside* a call they are already
+ * making, and going through the action would run `prepare` — and therefore
+ * `getCurrentMember`'s round trip — a second time per report. The arguments are
+ * already scoped by then; re-deriving who the caller is would be the second
+ * definition of an admin that §0.2 warns about.
+ *
+ * Not exported: a `'use server'` module publishes every export as an endpoint,
+ * and this one takes arguments that have already been through §9.2's scoping —
+ * publishing it would publish a way around it.
+ */
+async function queryExpectedByUser(
+  args: ReportExpectedArgs,
+): Promise<ActionResult<ExpectedForUser[]>> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("report_expected_by_user", args);
+
+    if (error) {
+      return { ok: false, error: reportErrorMessage(error) };
+    }
+
+    const rows: RawExpectedUserRow[] = data;
+    return {
+      ok: true,
+      data: rows.map((row) => ({
+        userId: row.user_id,
+        userName: row.user_name,
+        expectedSeconds: row.expected_seconds,
+      })),
+    };
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+}
+
+/** `queryExpectedByUser`, split by project. Same caveats, one grouping finer. */
+async function queryExpectedByUserProject(
+  args: ReportExpectedArgs,
+): Promise<ActionResult<ExpectedForUserProject[]>> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc(
+      "report_expected_by_user_project",
+      args,
+    );
+
+    if (error) {
+      return { ok: false, error: reportErrorMessage(error) };
+    }
+
+    const rows: RawExpectedUserProjectRow[] = data;
+    return {
+      ok: true,
+      data: rows.map((row) => ({
+        userId: row.user_id,
+        userName: row.user_name,
+        projectId: row.project_id,
+        projectName: row.project_name,
+        // Read from the function rather than nulled out. These are only ever
+        // *used* on the rows the merge appends — someone expected on a project
+        // they logged nothing to — because every row carrying hours takes its
+        // labels from the actual aggregate instead. But those appended rows are
+        // exactly the ones with no aggregate to borrow from, so without these
+        // two an attendance row would render the "no client" placeholder for a
+        // project that has one.
+        clientId: row.client_id,
+        clientName: row.client_name,
+        expectedSeconds: row.expected_seconds,
+      })),
+    };
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+}
+
+/**
+ * §9.8's expected figures per person, on their own.
+ *
+ * A thin wrapper over the RPC for callers that want the expected side without
+ * the actual one; the report views below do not use it, because they need both
+ * halves in one round trip's worth of latency and merge them.
+ *
+ * Returns an empty array under a task filter rather than an error: the caller
+ * asked a question with no answer (§9.8.2), and "there is nothing to show" is
+ * the honest reply to it — a refusal would make a task filter break a report
+ * rather than narrow it.
+ */
+export async function getReportExpectedByUser(
+  filters: ReportFiltersInput,
+): Promise<ActionResult<ExpectedForUser[]>> {
+  const args = await prepare(filters);
+  if (!args.ok) {
+    return args;
+  }
+
+  const expectedArgs = expectedArgsFor(args.data);
+  if (!expectedArgs) {
+    return { ok: true, data: [] };
+  }
+
+  return queryExpectedByUser(expectedArgs);
+}
+
+/** `getReportExpectedByUser`, split by project. Same task-filter rule. */
+export async function getReportExpectedByUserProject(
+  filters: ReportFiltersInput,
+): Promise<ActionResult<ExpectedForUserProject[]>> {
+  const args = await prepare(filters);
+  if (!args.ok) {
+    return args;
+  }
+
+  const expectedArgs = expectedArgsFor(args.data);
+  if (!expectedArgs) {
+    return { ok: true, data: [] };
+  }
+
+  return queryExpectedByUserProject(expectedArgs);
+}
+
+/**
+ * §9.3's by-user aggregate **and** §9.8's expected figures, merged into the
+ * attendance view.
+ *
+ * The two are fetched in parallel — they are independent reads over different
+ * tables, and running them in sequence would double the latency of the report
+ * that most often has both columns on screen.
+ *
+ * **The merge is a union, not a join** (§9.8.3), which is the whole reason this
+ * action exists in this shape. `report_by_user` is a `GROUP BY` over
+ * `time_entries`, so somebody who logged nothing produces no row at all — and
+ * an employee expected to work 20:00:00 who logged nothing is precisely the row
+ * an attendance report exists to surface. `mergeExpectedByUser` appends them
+ * with a zero worked total; an inner join would drop exactly the case the
+ * feature was built for.
+ */
 export async function getReportByUser(
   filters: ReportFiltersInput,
 ): Promise<ActionResult<ReportUserRow[]>> {
@@ -481,24 +772,41 @@ export async function getReportByUser(
     return args;
   }
 
+  const expectedArgs = expectedArgsFor(args.data);
+
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc("report_by_user", args.data);
 
-    if (error) {
-      return { ok: false, error: reportErrorMessage(error) };
+    const [actual, expected] = await Promise.all([
+      supabase.rpc("report_by_user", args.data),
+      expectedArgs ? queryExpectedByUser(expectedArgs) : null,
+    ]);
+
+    if (actual.error) {
+      return { ok: false, error: reportErrorMessage(actual.error) };
     }
 
-    const rows: RawUserRow[] = data;
-    return {
-      ok: true,
-      data: rows.map((row) => ({
-        userId: row.user_id,
-        userName: row.user_name,
-        entryCount: row.entry_count,
-        totalSeconds: row.total_seconds,
-      })),
-    };
+    const rows: RawUserRow[] = actual.data;
+    const totals: ActualUserTotals[] = rows.map((row) => ({
+      userId: row.user_id,
+      userName: row.user_name,
+      entryCount: row.entry_count,
+      totalSeconds: row.total_seconds,
+    }));
+
+    // A task filter: expected is undefined for every row, and saying so with
+    // null is the point — see `ReportUserRow`.
+    if (expected === null) {
+      return {
+        ok: true,
+        data: totals.map((row) => ({ ...row, expectedSeconds: null })),
+      };
+    }
+    if (!expected.ok) {
+      return expected;
+    }
+
+    return { ok: true, data: mergeExpectedByUser(totals, expected.data) };
   } catch {
     return { ok: false, error: NOT_CONFIGURED };
   }
@@ -601,6 +909,17 @@ export async function getReportByClient(
   }
 }
 
+/**
+ * §9.3's cross-tab with §9.8's expected column, merged on the (person, project)
+ * pair.
+ *
+ * Everything said about `getReportByUser` applies unchanged; the only
+ * difference is the key, and it is what lets the view say *which* project a
+ * shortfall is on. The union matters at least as much here: an assignment
+ * somebody has never logged an hour against produces no `report_by_user_project`
+ * row, and a project a person is scheduled on but ignoring is the single most
+ * useful line in an attendance report.
+ */
 export async function getReportByUserProject(
   filters: ReportFiltersInput,
 ): Promise<ActionResult<ReportUserProjectRow[]>> {
@@ -609,30 +928,45 @@ export async function getReportByUserProject(
     return args;
   }
 
+  const expectedArgs = expectedArgsFor(args.data);
+
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc(
-      "report_by_user_project",
-      args.data,
-    );
 
-    if (error) {
-      return { ok: false, error: reportErrorMessage(error) };
+    const [actual, expected] = await Promise.all([
+      supabase.rpc("report_by_user_project", args.data),
+      expectedArgs ? queryExpectedByUserProject(expectedArgs) : null,
+    ]);
+
+    if (actual.error) {
+      return { ok: false, error: reportErrorMessage(actual.error) };
     }
 
-    const rows: RawUserProjectRow[] = data;
+    const rows: RawUserProjectRow[] = actual.data;
+    const totals: ActualUserProjectTotals[] = rows.map((row) => ({
+      userId: row.user_id,
+      userName: row.user_name,
+      projectId: row.project_id,
+      projectName: row.project_name,
+      clientId: row.client_id,
+      clientName: row.client_name,
+      entryCount: row.entry_count,
+      totalSeconds: row.total_seconds,
+    }));
+
+    if (expected === null) {
+      return {
+        ok: true,
+        data: totals.map((row) => ({ ...row, expectedSeconds: null })),
+      };
+    }
+    if (!expected.ok) {
+      return expected;
+    }
+
     return {
       ok: true,
-      data: rows.map((row) => ({
-        userId: row.user_id,
-        userName: row.user_name,
-        projectId: row.project_id,
-        projectName: row.project_name,
-        clientId: row.client_id,
-        clientName: row.client_name,
-        entryCount: row.entry_count,
-        totalSeconds: row.total_seconds,
-      })),
+      data: mergeExpectedByUserProject(totals, expected.data),
     };
   } catch {
     return { ok: false, error: NOT_CONFIGURED };
@@ -646,6 +980,13 @@ export async function getReportByUserProject(
  * input, including a row of zeroes for an empty range — the empty-array branch
  * below is therefore unreachable through PostgREST and exists so that an empty
  * response renders "0:00:00" rather than crashing on `undefined.entry_count`.
+ *
+ * §9.8.1's Expected figure joins it **only when the report is about one
+ * person**, and `args.p_user_id` is exactly that test rather than a proxy for
+ * it: `prepare` sets it to the caller's own id for every employee (§9.2) and
+ * leaves it undefined for an admin who has not filtered. Reading `member.role`
+ * here instead would be a second definition of the same condition, free to
+ * disagree with the one that actually chose the id.
  */
 export async function getReportSummary(
   filters: ReportFiltersInput,
@@ -655,16 +996,46 @@ export async function getReportSummary(
     return args;
   }
 
+  // Two independent reasons to have no expected figure, and both must hold for
+  // there to be one: a task filter makes it undefined (§9.8.2, inside
+  // `expectedArgsFor`), and a report covering more than one person has no
+  // single number to put in a header (§9.8.1).
+  const expectedArgs = expectedArgsFor(args.data);
+  const singlePerson = args.data.p_user_id !== undefined;
+
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc("report_summary", args.data);
 
-    if (error) {
-      return { ok: false, error: reportErrorMessage(error) };
+    const [summary, expected] = await Promise.all([
+      supabase.rpc("report_summary", args.data),
+      expectedArgs && singlePerson ? queryExpectedByUser(expectedArgs) : null,
+    ]);
+
+    if (summary.error) {
+      return { ok: false, error: reportErrorMessage(summary.error) };
     }
 
-    const rows: RawSummaryRow[] = data;
+    const rows: RawSummaryRow[] = summary.data;
     const row = rows.at(0);
+
+    let expectedSeconds: number | null = null;
+    if (expected !== null) {
+      if (!expected.ok) {
+        return expected;
+      }
+
+      // Summed rather than read off `rows[0]`. Filtered to one person the
+      // function returns at most one row — it groups by `user_id` — so this is
+      // a sum over one element today, and it is written as a sum because the
+      // alternative is an assumption about a GROUP BY in another file. Zero
+      // rows is a person with no schedule anywhere, whose expected total is 0
+      // (an absence of targets, not an absence of an answer); the null case is
+      // decided above, before the query is made at all.
+      expectedSeconds = expected.data.reduce(
+        (total, expectedRow) => total + expectedRow.expectedSeconds,
+        0,
+      );
+    }
 
     return {
       ok: true,
@@ -672,6 +1043,7 @@ export async function getReportSummary(
         entryCount: row?.entry_count ?? 0,
         totalSeconds: row?.total_seconds ?? 0,
         runningCount: row?.running_count ?? 0,
+        expectedSeconds,
       },
     };
   } catch {

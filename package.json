@@ -16,6 +16,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:new": "supabase migration new",
+    "db:status": "supabase migration list --local",
+    "db:migrate": "supabase migration up --local",
+    "db:types": "supabase gen types typescript --local > src/types/supabase.ts && prettier --write src/types/supabase.ts",
     "prepare": "husky"
   },
   "dependencies": {

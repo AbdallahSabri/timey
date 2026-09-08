@@ -86,6 +86,13 @@ export default async function ProjectPage({
     redirect("/dashboard");
   }
 
+  // §3.6.3's day picker is the first thing in the app to read this column. It
+  // orders the seven checkboxes and the "Mon, Tue, Thu, Fri" summary beside
+  // them; the values stored stay 0–6 dow regardless, so a company that reads
+  // its week from Sunday sees a different order and means the same schedule.
+  // Monday when there is no company on record, matching the column's default.
+  const weekStartsOn = currentMember?.company?.weekStartsOn ?? 1;
+
   const isArchived = project.archivedAt !== null;
 
   // An archived project is a dead end — nothing un-archives it (§3.11) — so it
@@ -186,8 +193,10 @@ export default async function ProjectPage({
           {projectMembersResult.ok ? (
             <ProjectMemberList
               projectId={project.id}
+              projectName={project.name}
               members={projectMembers}
               canManage={canManage}
+              weekStartsOn={weekStartsOn}
             />
           ) : (
             <p className="text-destructive text-sm">
@@ -204,6 +213,7 @@ export default async function ProjectPage({
               <AddProjectMemberForm
                 projectId={project.id}
                 candidates={candidates}
+                weekStartsOn={weekStartsOn}
               />
             )
           ) : null}

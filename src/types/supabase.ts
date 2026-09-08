@@ -256,20 +256,26 @@ export type Database = {
         Row: {
           added_at: string;
           company_id: string;
+          expected_daily_seconds: number;
           project_id: string;
           user_id: string;
+          working_days: number[];
         };
         Insert: {
           added_at?: string;
           company_id?: string;
+          expected_daily_seconds?: number;
           project_id: string;
           user_id: string;
+          working_days?: number[];
         };
         Update: {
           added_at?: string;
           company_id?: string;
+          expected_daily_seconds?: number;
           project_id?: string;
           user_id?: string;
+          working_days?: number[];
         };
         Relationships: [
           {
@@ -916,6 +922,38 @@ export type Database = {
           task_id: string;
           task_name: string;
           total_count: number;
+          user_id: string;
+          user_name: string;
+        }[];
+      };
+      report_expected_by_user: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          expected_seconds: number;
+          user_id: string;
+          user_name: string;
+        }[];
+      };
+      report_expected_by_user_project: {
+        Args: {
+          p_client_id?: string;
+          p_from: string;
+          p_project_id?: string;
+          p_to: string;
+          p_user_id?: string;
+        };
+        Returns: {
+          client_id: string;
+          client_name: string;
+          expected_seconds: number;
+          project_id: string;
+          project_name: string;
           user_id: string;
           user_name: string;
         }[];

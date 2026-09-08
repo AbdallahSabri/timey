@@ -37,7 +37,13 @@ describe("describeReport — readable labels", () => {
     const model = describeReport({
       grouping: "user",
       rows: [
-        { userId: "u1", userName: "Ada", entryCount: 3, totalSeconds: 22450 },
+        {
+          userId: "u1",
+          userName: "Ada",
+          entryCount: 3,
+          totalSeconds: 22450,
+          expectedSeconds: null,
+        },
       ],
     });
 
@@ -99,7 +105,15 @@ describe("describeReport — labels the caller cannot read", () => {
 
     const users = describeReport({
       grouping: "user",
-      rows: [{ userId: "u1", userName: null, entryCount: 1, totalSeconds: 60 }],
+      rows: [
+        {
+          userId: "u1",
+          userName: null,
+          entryCount: 1,
+          totalSeconds: 60,
+          expectedSeconds: null,
+        },
+      ],
     });
 
     expect(users.rows[0]?.labels[0]?.text).toBe(UNKNOWN_PERSON);
@@ -151,6 +165,7 @@ describe("describeReport — labels the caller cannot read", () => {
           clientName: null,
           entryCount: 1,
           totalSeconds: 60,
+          expectedSeconds: null,
         },
       ],
     });
@@ -166,16 +181,79 @@ describe("describeReport — labels the caller cannot read", () => {
 describe("totalsOf", () => {
   it("sums integer seconds, so the footer matches the header", () => {
     const totals = totalsOf([
-      { key: "a", labels: [], entryCount: 2, totalSeconds: 3661 },
-      { key: "b", labels: [], entryCount: 1, totalSeconds: 59 },
+      {
+        key: "a",
+        labels: [],
+        entryCount: 2,
+        totalSeconds: 3661,
+        expectedSeconds: null,
+      },
+      {
+        key: "b",
+        labels: [],
+        entryCount: 1,
+        totalSeconds: 59,
+        expectedSeconds: null,
+      },
     ]);
 
     // §9.5 — summed as integers. Summing 1.0169 + 0.0164 hours and multiplying
     // back is how a total stops matching its own line items.
-    expect(totals).toStrictEqual({ entryCount: 3, totalSeconds: 3720 });
+    expect(totals).toStrictEqual({
+      entryCount: 3,
+      totalSeconds: 3720,
+      expectedSeconds: null,
+    });
   });
 
   it("is zero for no rows", () => {
-    expect(totalsOf([])).toStrictEqual({ entryCount: 0, totalSeconds: 0 });
+    expect(totalsOf([])).toStrictEqual({
+      entryCount: 0,
+      totalSeconds: 0,
+      // Null rather than 0: no rows means nothing was asked of anybody *and*
+      // nobody was asked for nothing. The footer omits the cell.
+      expectedSeconds: null,
+    });
+  });
+
+  it("sums expected alongside worked when the rows carry one", () => {
+    const totals = totalsOf([
+      {
+        key: "a",
+        labels: [],
+        entryCount: 2,
+        totalSeconds: 3661,
+        expectedSeconds: 7200,
+      },
+      {
+        key: "b",
+        labels: [],
+        entryCount: 1,
+        totalSeconds: 59,
+        expectedSeconds: 3600,
+      },
+    ]);
+
+    expect(totals).toStrictEqual({
+      entryCount: 3,
+      totalSeconds: 3720,
+      expectedSeconds: 10800,
+    });
+  });
+
+  it("keeps expected null when no row has one, rather than totalling zero", () => {
+    // The task-filter case (§9.8.2). A footer of 0:00:00 under blank cells
+    // would be the one place the table asserted nothing was expected.
+    const totals = totalsOf([
+      {
+        key: "a",
+        labels: [],
+        entryCount: 1,
+        totalSeconds: 60,
+        expectedSeconds: null,
+      },
+    ]);
+
+    expect(totals.expectedSeconds).toBeNull();
   });
 });

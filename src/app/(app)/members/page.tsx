@@ -91,6 +91,11 @@ export default async function MembersPage() {
               members={membersResult.data}
               currentUserId={currentMember?.id ?? null}
               canManage={isAdmin}
+              /* Orders the schedule dialog's day picker only (§3.6.3) —
+                 `working_days` is stored in 0–6 dow whatever a company reads
+                 its week from. Monday when there is no company on record,
+                 matching the column's default. */
+              weekStartsOn={currentMember?.company?.weekStartsOn ?? 1}
             />
           ) : (
             <p className="text-destructive text-sm">{membersResult.error}</p>

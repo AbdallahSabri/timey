@@ -52,6 +52,15 @@ export type CurrentMember = {
     name: string;
     timezone: string;
     maxTimerHours: number;
+    /**
+     * 0 = Sunday, 1 = Monday (§3.1). Stored since Phase 1 and, until §9.8's
+     * schedule picker, read by nothing — the column was carried on the promise
+     * that something would eventually order a week by it, and this is that
+     * something. It orders *display* only: `working_days` is stored in
+     * `extract(dow)` numbering regardless, so rotating a picker can never
+     * change what a schedule means.
+     */
+    weekStartsOn: number;
   } | null;
 };
 
@@ -226,7 +235,7 @@ export async function getCurrentMember(): Promise<
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "id, full_name, role, status, companies (id, name, timezone, max_timer_hours)",
+        "id, full_name, role, status, companies (id, name, timezone, max_timer_hours, week_starts_on)",
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -255,6 +264,7 @@ export async function getCurrentMember(): Promise<
               name: data.companies.name,
               timezone: data.companies.timezone,
               maxTimerHours: data.companies.max_timer_hours,
+              weekStartsOn: data.companies.week_starts_on,
             }
           : null,
       },

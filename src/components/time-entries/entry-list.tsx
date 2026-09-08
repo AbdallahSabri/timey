@@ -17,10 +17,19 @@ import type { TimeEntryWithLabels } from "@/lib/actions/time-entries";
 
 /**
  * The signed-in user's own recent entries — a work log, not a report. §9's
- * groupings, date ranges and company-local day buckets belong to Phase 8, and
- * this table deliberately computes no total at all: §9.4 excludes running
- * entries from every sum, and the cheapest way to honour that here is to sum
- * nothing.
+ * groupings, date ranges and company-local day buckets are not this table's
+ * business, and **this table still computes no total at all**: it is the last
+ * N rows rather than a range, so any figure under it would be a total of an
+ * arbitrary window, and §9.4 excludes running entries from every sum anyway.
+ * The cheapest way to honour both is to sum nothing.
+ *
+ * **That is not the same as "the dashboard has no totals".** §9.8's month card
+ * sits above this list and does show worked against expected — but it is a
+ * *report*, reading `report_summary` over an explicit company-local range,
+ * which is the sanctioned path (§9.8.1). The rule this comment records is that
+ * a total must come from a range someone chose, not from however many rows
+ * happen to be on screen; the card obeys it and this table has no range to
+ * obey it with.
  *
  * **No row is editable and none should become so.** §7.1 allows an employee to
  * edit the note on their own entry and nothing else once it closes; times on a

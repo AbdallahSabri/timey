@@ -482,6 +482,14 @@ export async function getRunningTimer(): Promise<
  * totals belong to Phase 8, and nothing here should grow into them. There is no
  * date range and no aggregation on purpose.
  *
+ * That rule still holds now the dashboard shows a month-to-date total beside
+ * this list (§9.8). The total is not computed here and must not be: the card
+ * reads `report_summary`, the same aggregate `/reports` reads, precisely so the
+ * two cannot disagree. The temptation this comment exists to refuse is summing
+ * these ten rows to save a round trip — which would produce a "month" figure
+ * covering whatever ten entries happened to be newest, and would count the
+ * running one §9.4 excludes.
+ *
  * Running entries are included, because this is a work log rather than a total
  * and the row the user just started is the one they most expect to see; §9.4's
  * "running entries contribute zero" governs sums, and this function computes
