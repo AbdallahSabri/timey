@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { formatSchedule } from "@/components/project-members/format-schedule";
+import { MemberScheduleDialog } from "@/components/project-members/member-schedule-dialog";
 import { DataCard, DataCardList } from "@/components/structure/data-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,18 +33,30 @@ export type ProjectMemberRow = ProjectMember & { addedLabel: string };
  * carries no history, so re-adding someone restores the state exactly. That is
  * the opposite of archiving, which is why archiving asks first and this does
  * not.
+ *
+ * Each row also carries §3.6.3's schedule — `4h/day · Mon, Tue, Thu, Fri` — and
+ * an Edit control for it. The schedule is a property of *this* assignment, so
+ * this is one of the two places it can be changed and the other (the Team
+ * page) reaches the same row through the same action.
  */
 export function ProjectMemberList({
   projectId,
+  projectName,
   members,
   canManage,
+  weekStartsOn,
 }: {
   projectId: string;
+  projectName: string;
   members: ProjectMemberRow[];
   canManage: boolean;
+  /** `companies.week_starts_on` — orders the day picker's checkboxes only. */
+  weekStartsOn: number;
 }) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
+  /** Which row's schedule dialog is open, by user id. */
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   async function remove(member: ProjectMemberRow) {
     setPendingId(member.userId);
@@ -67,23 +81,50 @@ export function ProjectMemberList({
     );
   }
 
-  function removeControl(member: ProjectMemberRow) {
+  function rowControls(member: ProjectMemberRow) {
     if (!canManage) {
       return null;
     }
 
     return (
-      <Button
-        type="button"
-        variant="destructive"
-        size="sm"
-        disabled={pendingId === member.userId}
-        onClick={() => void remove(member)}
-      >
-        {pendingId === member.userId ? "Removing…" : "Remove"}
-      </Button>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pendingId === member.userId}
+          onClick={() => setEditingId(member.userId)}
+        >
+          Edit hours
+        </Button>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          disabled={pendingId === member.userId}
+          onClick={() => void remove(member)}
+        >
+          {pendingId === member.userId ? "Removing…" : "Remove"}
+        </Button>
+      </div>
     );
   }
+
+  /**
+   * The row being edited, if any.
+   *
+   * **One dialog for the whole list, not one per row**, because every row is
+   * rendered twice — once as a `DataCard` below `md` and once as a table row
+   * above it. A dialog mounted inside each would put two open copies of the
+   * same form in the DOM, both portalled to the body, where the breakpoint
+   * classes that hide one list cannot reach either.
+   *
+   * Mounted only while open, so `useForm` reads `defaultValues` from the row's
+   * current values each time it appears — those are read once at mount, and a
+   * dialog kept mounted across a `router.refresh()` would go on showing the
+   * hours it opened with after they had changed underneath it.
+   */
+  const editing = members.find((member) => member.userId === editingId) ?? null;
 
   return (
     <>
@@ -93,7 +134,7 @@ export function ProjectMemberList({
             key={member.userId}
             muted={member.status !== "active"}
             title={member.fullName}
-            action={removeControl(member)}
+            action={rowControls(member)}
             fields={[
               { label: "Role", value: member.role },
               { label: "Status", value: member.status },
@@ -101,6 +142,14 @@ export function ProjectMemberList({
                 label: "Assigned",
                 value: member.addedLabel,
                 numeric: true,
+              },
+              {
+                label: "Expected",
+                value: formatSchedule(
+                  member.expectedDailySeconds,
+                  member.workingDays,
+                  weekStartsOn,
+                ),
               },
             ]}
           />
@@ -115,8 +164,9 @@ export function ProjectMemberList({
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Assigned</TableHead>
+              <TableHead>Expected</TableHead>
               {canManage ? (
-                <TableHead className="w-24">
+                <TableHead className="w-52">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               ) : null}
@@ -136,9 +186,19 @@ export function ProjectMemberList({
                 <TableCell className="font-mono tabular-nums">
                   {member.addedLabel}
                 </TableCell>
+                {/* Mono because the hours are a figure, even inside a sentence
+                    that also names days — it lines up down the column with the
+                    Assigned dates beside it. */}
+                <TableCell className="font-mono tabular-nums">
+                  {formatSchedule(
+                    member.expectedDailySeconds,
+                    member.workingDays,
+                    weekStartsOn,
+                  )}
+                </TableCell>
                 {canManage ? (
                   <TableCell className="text-right">
-                    {removeControl(member)}
+                    {rowControls(member)}
                   </TableCell>
                 ) : null}
               </TableRow>
@@ -146,6 +206,20 @@ export function ProjectMemberList({
           </TableBody>
         </Table>
       </div>
+
+      {editing ? (
+        <MemberScheduleDialog
+          projectId={projectId}
+          userId={editing.userId}
+          memberName={editing.fullName}
+          projectName={projectName}
+          expectedDailySeconds={editing.expectedDailySeconds}
+          workingDays={editing.workingDays}
+          weekStartsOn={weekStartsOn}
+          open
+          onOpenChange={(next) => setEditingId(next ? editing.userId : null)}
+        />
+      ) : null}
     </>
   );
 }

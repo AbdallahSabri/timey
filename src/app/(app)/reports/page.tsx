@@ -267,6 +267,17 @@ export default async function ReportsPage({
     );
   const runningCount = summaryResult.ok ? summaryResult.data.runningCount : 0;
 
+  // §9.8.2 — a task filter makes expected undefined, so the two attendance
+  // columns are omitted rather than zeroed. Said out loud for the same reason
+  // the detail view explains its missing total: a column that is simply gone
+  // reads as a bug, and the absence here is a ruling. The caption is scoped to
+  // the two groupings that would otherwise carry the columns; nowhere else was
+  // ever going to show them (§3.6.3), so explaining it under By project would
+  // answer a question nobody asked.
+  const taskFilterHidesExpected =
+    Boolean(query.taskId) &&
+    (query.grouping === "user" || query.grouping === "user-project");
+
   // A CSV of nothing helps nobody, and the two views count "nothing"
   // differently: the detail export is the whole range (§9.6), so it is the
   // server's `totalCount` that decides, not the length of the page on screen.
@@ -419,6 +430,14 @@ export default async function ReportsPage({
                     </div>
                   }
                 />
+                {taskFilterHidesExpected ? (
+                  <p className="text-muted-foreground text-xs">
+                    Expected hours aren&rsquo;t shown while a task filter is
+                    set. Hours are expected per project, not per task, so there
+                    is no target for one task to compare against — clear the
+                    task filter to see them.
+                  </p>
+                ) : null}
                 {hasUnreadableLabels ? (
                   <p className="text-muted-foreground text-xs">
                     A greyed-out label is one this report can&rsquo;t name: a

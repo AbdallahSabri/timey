@@ -10,6 +10,7 @@ import {
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
+import { differenceSeconds } from "@/components/reports/report-expected";
 import {
   totalsOf,
   type ReportCell,
@@ -51,8 +52,48 @@ const features = tableFeatures({
 
 const helper = createColumnHelper<typeof features, ReportRow>();
 
-/** Right-aligned and tabular; the two columns that are numbers, not names. */
-const NUMERIC_COLUMN_IDS = new Set(["entries", "duration"]);
+/** Right-aligned and tabular; the columns that are numbers, not names. */
+const NUMERIC_COLUMN_IDS = new Set([
+  "entries",
+  "duration",
+  "expected",
+  "difference",
+]);
+
+/** What an omitted Expected or Difference reads as — see `DifferenceCell`. */
+const ABSENT = "—";
+
+/**
+ * Worked minus expected, with the sign carried twice over: once in the glyph
+ * and once in the colour.
+ *
+ * **`formatSecondsHms` clamps negatives to `0:00:00`**, so a shortfall handed
+ * to it raw would render as "no difference" — the exact reading it must not
+ * have. The absolute value is formatted and the direction is prefixed, which is
+ * also what `lib/reports/columns.ts` writes into the CSV, so the screen and the
+ * file cannot disagree about which way behind points.
+ *
+ * **Ledger green for at-or-above target, plain foreground for behind.** Not
+ * `--live`: that token marks a running timer and nothing else (`CLAUDE.md`).
+ * Not `destructive` either — being behind on a Tuesday is an ordinary state of
+ * a timesheet, and §9.8 already warns that today counts in full, so the figure
+ * reads short for most of every working day. Colouring it as an error would
+ * make the common case look like a fault.
+ */
+function DifferenceCell({ seconds }: { seconds: number | null }) {
+  if (seconds === null) {
+    return <span className="text-muted-foreground">{ABSENT}</span>;
+  }
+
+  const behind = seconds < 0;
+
+  return (
+    <span className={behind ? "text-foreground" : "text-primary"}>
+      {behind ? "−" : "+"}
+      {formatSecondsHms(Math.abs(seconds))}
+    </span>
+  );
+}
 
 function LabelCellText({ cell }: { cell: ReportCell | undefined }) {
   if (!cell) {
@@ -79,6 +120,21 @@ export function ReportDataTable({
   emptyState: ReactNode;
 }) {
   const { labelHeaders, rows } = model;
+
+  /**
+   * §9.8.1's attendance columns, present only when there is something to put in
+   * them.
+   *
+   * The test is the data, not the grouping: `describeReport` already writes
+   * null on the four groupings nobody owes hours against (§3.6.3), and null on
+   * the two that do whenever a task filter made expected undefined (§9.8.2). So
+   * asking whether any row has a figure answers both questions at once, and
+   * cannot drift from the rule that decided them.
+   *
+   * Omitted rather than emptied, deliberately: two blank columns headed
+   * "Expected" would invite the reading that the answer is zero.
+   */
+  const hasExpected = rows.some((row) => row.expectedSeconds !== null);
 
   const columns = useMemo(
     () =>
@@ -108,8 +164,51 @@ export function ReportDataTable({
           cell: (context) =>
             formatSecondsHms(context.row.original.totalSeconds),
         }),
+        // Both accessors return the integer and both cells format it, for the
+        // reason Duration does: sorted as rendered text, "10:30:00" would fall
+        // below "7:30:00" in both directions. It matters more on Difference,
+        // where the text also carries a sign — "−1:00:00" and "+1:00:00" sort
+        // as strings by their prefix, which would group every shortfall
+        // together and call it an ordering.
+        //
+        // `?? 0` is unreachable while these columns exist at all: `hasExpected`
+        // is what admits them, and the null it screens for is decided once for
+        // the whole report. It is the sort key only — the cells below read the
+        // original null and omit themselves.
+        ...(hasExpected
+          ? [
+              helper.accessor((row: ReportRow) => row.expectedSeconds ?? 0, {
+                id: "expected",
+                header: "Expected",
+                cell: (context) => {
+                  const expected = context.row.original.expectedSeconds;
+                  return expected === null ? (
+                    <span className="text-muted-foreground">{ABSENT}</span>
+                  ) : (
+                    formatSecondsHms(expected)
+                  );
+                },
+              }),
+              helper.accessor(
+                (row: ReportRow) =>
+                  differenceSeconds(row.totalSeconds, row.expectedSeconds) ?? 0,
+                {
+                  id: "difference",
+                  header: "Difference",
+                  cell: (context) => (
+                    <DifferenceCell
+                      seconds={differenceSeconds(
+                        context.row.original.totalSeconds,
+                        context.row.original.expectedSeconds,
+                      )}
+                    />
+                  ),
+                },
+              ),
+            ]
+          : []),
       ]),
-    [labelHeaders],
+    [labelHeaders, hasExpected],
   );
 
   const table = useTable({ features, columns, data: rows });
@@ -198,6 +297,26 @@ export function ReportDataTable({
           <TableCell className="text-right font-mono tabular-nums">
             {formatSecondsHms(totals.totalSeconds)}
           </TableCell>
+          {/* The range's expected total and the range's shortfall, summed from
+              the same visible rows as the two figures beside them — §12.2's
+              check applies to these columns exactly as it does to Duration. */}
+          {hasExpected ? (
+            <>
+              <TableCell className="text-right font-mono tabular-nums">
+                {totals.expectedSeconds === null
+                  ? ABSENT
+                  : formatSecondsHms(totals.expectedSeconds)}
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums">
+                <DifferenceCell
+                  seconds={differenceSeconds(
+                    totals.totalSeconds,
+                    totals.expectedSeconds,
+                  )}
+                />
+              </TableCell>
+            </>
+          ) : null}
         </TableRow>
       </TableFooter>
     </Table>

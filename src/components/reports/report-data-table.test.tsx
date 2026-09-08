@@ -178,3 +178,135 @@ describe("ReportDataTable", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });
+
+/** The by-user shape, which is one of the two that carry §9.8's attendance pair. */
+function userModel(
+  expected: [number | null, number | null, number | null] = [
+    72_000, 36_000, 3_600,
+  ],
+) {
+  return describeReport({
+    grouping: "user",
+    rows: [
+      {
+        userId: "u1",
+        userName: "Ada",
+        entryCount: 4,
+        totalSeconds: 36_000,
+        expectedSeconds: expected[0],
+      },
+      {
+        userId: "u2",
+        userName: "Grace",
+        entryCount: 2,
+        totalSeconds: 36_000,
+        expectedSeconds: expected[1],
+      },
+      {
+        userId: "u3",
+        userName: "Katherine",
+        entryCount: 1,
+        totalSeconds: 7_200,
+        expectedSeconds: expected[2],
+      },
+    ],
+  });
+}
+
+describe("ReportDataTable — expected hours (§9.8)", () => {
+  it("adds Expected and Difference to a per-person grouping", () => {
+    render(<ReportDataTable model={userModel()} emptyState="nothing" />);
+
+    expect(
+      screen.getByRole("columnheader", { name: /expected/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: /difference/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("carries the sign explicitly, since the formatter clamps negatives", () => {
+    render(<ReportDataTable model={userModel()} emptyState="nothing" />);
+
+    // Ada worked 10:00:00 of 20:00:00. Passed raw to `formatSecondsHms` this
+    // would render "0:00:00" — "no difference" — for a ten-hour shortfall.
+    expect(screen.getByText("−10:00:00")).toBeInTheDocument();
+    // Grace is exactly on target, and Katherine is an hour ahead.
+    expect(screen.getByText("+0:00:00")).toBeInTheDocument();
+    expect(screen.getByText("+1:00:00")).toBeInTheDocument();
+  });
+
+  it("sorts Difference numerically, not by its formatted text", async () => {
+    const user = userEvent.setup();
+    render(<ReportDataTable model={userModel()} emptyState="nothing" />);
+
+    await user.click(screen.getByRole("button", { name: /difference/i }));
+
+    // Largest surplus first. Sorted as strings, the "−" prefix would group
+    // every shortfall together and call that an ordering.
+    expect(bodyRows().map((row) => cellsOf(row).at(-1))).toStrictEqual([
+      "+1:00:00",
+      "+0:00:00",
+      "−10:00:00",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: /difference/i }));
+
+    expect(bodyRows().map((row) => cellsOf(row).at(-1))).toStrictEqual([
+      "−10:00:00",
+      "+0:00:00",
+      "+1:00:00",
+    ]);
+  });
+
+  it("marks the Difference column for assistive technology when sorted", async () => {
+    const user = userEvent.setup();
+    render(<ReportDataTable model={userModel()} emptyState="nothing" />);
+
+    const header = screen.getByRole("columnheader", { name: /difference/i });
+    expect(header).toHaveAttribute("aria-sort", "none");
+
+    await user.click(within(header).getByRole("button"));
+    expect(header).toHaveAttribute("aria-sort", "descending");
+  });
+
+  it("totals expected in the footer alongside the hours worked", () => {
+    render(<ReportDataTable model={userModel()} emptyState="nothing" />);
+
+    // 72000 + 36000 + 3600 = 111600 = 31:00:00 expected against
+    // 36000 + 36000 + 7200 = 79200 = 22:00:00 worked, so 9 hours behind.
+    const footer = screen.getByRole("row", { name: /total/i });
+    expect(within(footer).getByText("31:00:00")).toBeInTheDocument();
+    expect(within(footer).getByText("−9:00:00")).toBeInTheDocument();
+  });
+
+  it("OMITS both columns when expected is null, rather than showing zero", () => {
+    // §9.8.2's task filter. A zero would assert that nothing was expected,
+    // which is a stronger and falser claim than showing nothing at all.
+    render(
+      <ReportDataTable
+        model={userModel([null, null, null])}
+        emptyState="nothing"
+      />,
+    );
+
+    expect(
+      screen.queryByRole("columnheader", { name: /expected/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: /difference/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("0:00:00")).not.toBeInTheDocument();
+    expect(screen.queryByText("+0:00:00")).not.toBeInTheDocument();
+  });
+
+  it("shows no attendance columns on a grouping nobody owes hours against", () => {
+    // By project there is no person for a schedule to belong to (§3.6.3), so
+    // `describeReport` writes null and the columns never appear.
+    render(<ReportDataTable model={projectModel()} emptyState="nothing" />);
+
+    expect(
+      screen.queryByRole("columnheader", { name: /expected/i }),
+    ).not.toBeInTheDocument();
+  });
+});

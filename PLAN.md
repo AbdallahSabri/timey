@@ -425,6 +425,80 @@ Separated from Phase 5 deliberately: Phase 5 proves the constraint machinery usi
 - [ ] A 22:00→03:00 entry appears entirely on the start day, in company timezone
 - [ ] An employee filtering for another user's data gets their own, not an error and not the other user's
 
+## Phase 9 — Expected hours and attendance
+
+**Implements:** `SPEC.md` §3.6.3, §9.8, §9.8.1, §9.8.2, §9.8.3
+**Agents:** `write-migrations` → `implement-logic` → `build-ui`
+**Depends on:** Phase 8 (every surface here sits beside a Phase 8 figure)
+
+Phase 8 answers *how much*. This phase answers *is that enough*, by letting an admin
+declare what each employee is expected to work and showing the two numbers together.
+
+### Work items
+
+**Migration (§3.6.3) — lands alone, before any TypeScript (§0.2)**
+- `project_members` gains `expected_daily_seconds integer not null default 0` and
+  `working_days smallint[] not null default '{1,2,3,4,5}'`.
+- Day-of-week is Postgres `extract(dow)` numbering, 0=Sun … 6=Sat, so the comparison is
+  `= any(working_days)` with no offset arithmetic and it agrees with the numbering
+  `companies.week_starts_on` already uses.
+- Range/shape enforced by CHECK; ordering and de-duplication by a
+  `project_members_20_normalize_working_days()` BEFORE trigger. A CHECK cannot express
+  "distinct" without a subquery, and 0004's stated preference is to make a bad value
+  unrepresentable rather than merely rejected.
+- Extend the existing column GRANTs. **No new policies** — `project_members_insert_admin`
+  and `_update_admin` already gate both verbs to active admins of the company.
+- Two `security invoker` functions, `report_expected_by_user` and
+  `report_expected_by_user_project`, taking §9.2's filters minus `p_task_id`.
+
+**The four arithmetic rules (`BLOCKERS.md` D-17) — each is a defect if missed**
+- Working days are counted over **company-local dates**:
+  `generate_series(greatest(p_from, (added_at at time zone c.timezone)::date), p_to, interval '1 day')`.
+  Never `date_trunc`, never UTC — the same trap Phase 8 names as its most likely defect,
+  and worse here, because an expected figure bucketed in a different zone from the actual
+  it sits beside is wrong without looking wrong.
+- **Today counts in full.** Inclusive through `p_to`, no proration.
+- **Accrual starts at `added_at`**, so a back-filled assignment invents no shortfall.
+- **Integer seconds** (§9.5). The admin types hours; the action stores seconds.
+
+**Actions**
+- Schedule read/write on `project_members`, reusing `updateMemberRole`'s shape — including
+  its zero-rows branch, since an RLS `USING` failure filters rather than raises and
+  PostgREST reports success on an empty set.
+- Report wrappers reuse Phase 8's `prepare()`, so §9.2's employee scoping stays in one place.
+- **The by-user merge is a union, not a join** (§9.8.3). Someone expected to work who
+  logged nothing has no `report_by_user` row and is exactly the row that must appear. Keep
+  the merge a pure function so it is testable without a database.
+
+**UI**
+- Admin sets the schedule from two entry points against one row: the project detail page
+  and the Team page.
+- Reports: Expected + Difference in the by-user and by-user × project views and their CSVs;
+  an Expected figure in the summary header when the report resolves to one person.
+- Employee dashboard: worked vs expected, month to date, reading `report_summary` rather
+  than aggregating again — a dashboard figure that could disagree with `/reports` would be
+  worse than no figure.
+- Two captions are load-bearing, not decoration (§9.8.2): today is counted whole, and
+  §9.4 keeps a running timer out of the worked side.
+- `companies.week_starts_on` has been written since Phase 1 and never read. The day picker
+  is the first thing with a reason to care — plumb it through `getCurrentMember` and order
+  the checkboxes by it. Stored values stay 0–6 dow; only display order changes.
+
+### Exit criteria
+- Gate green.
+- An employee with two differently-scheduled projects shows one combined expected figure,
+  identical on the dashboard and in `/reports` for the same range.
+
+### Manual verification (§12.2)
+- [ ] An employee scheduled 4h/day Mon–Fri and 3h/day Mon/Tue/Thu/Fri on a second project sums to one figure
+- [ ] Someone with a schedule and zero entries still appears in the by-user view, with a non-zero expected
+- [ ] An assignment created mid-month accrues expected only from that day forward
+- [ ] Expected disappears — not zeroes — under a task filter, in the table and in the CSV
+- [ ] The dashboard says the running timer is excluded whenever one is running
+- [ ] A month boundary does not shift in a DST-at-midnight zone (`America/Havana`)
+
+---
+
 ---
 
 ## Sequencing rationale

@@ -58,6 +58,23 @@ export type ReportRow = {
   labels: ReportCell[];
   entryCount: number;
   totalSeconds: number;
+  /**
+   * §9.8's other half, and **the null here is not the null the label cells
+   * carry.** A muted label means "this caller cannot read that name". This
+   * means "expected is not a meaningful quantity for this row", which has
+   * exactly two causes:
+   *
+   *   * the grouping is not per-person — by day, project, task or client, there
+   *     is nobody for a schedule to belong to, so the question does not arise;
+   *   * a task filter is active on a per-person grouping, where §9.8.2 makes
+   *     expected undefined because schedules are per *project* (§3.6.3).
+   *
+   * A person with a schedule asking for nothing is `0`, never null — somebody
+   * said "no hours", which is an answer. The table must therefore **omit** the
+   * Expected and Difference cells on null rather than render `0:00:00`, which
+   * would assert the falser, stronger claim that nothing was expected.
+   */
+  expectedSeconds: number | null;
 };
 
 export type ReportTableModel = {
@@ -94,6 +111,16 @@ function dayCell(day: string): ReportCell {
  * exported file are read the same way round. That file is the CSV's contract
  * and cannot be imported for its layout (its columns are `CsvColumn`s that
  * produce raw values, not display text), so it is followed rather than reused.
+ *
+ * **`expectedSeconds` is hard-coded null in four of the six arms**, and that is
+ * a statement rather than a stub: §3.6.3 hangs a schedule on a (person,
+ * project) assignment, so only the two per-person groupings have anybody to owe
+ * hours. A by-project row sums several people's time and a by-day row sums the
+ * whole company's; "expected" for either would be a capacity figure this report
+ * never asked for. The two arms that *do* carry it pass the action's value
+ * through untouched, nulls included — the task-filter decision (§9.8.2) is made
+ * in `getReportByUser` before the merge, and re-deriving it here would be a
+ * second definition of the same rule.
  */
 export function describeReport(result: ReportResult): ReportTableModel {
   switch (result.grouping) {
@@ -105,6 +132,7 @@ export function describeReport(result: ReportResult): ReportTableModel {
           labels: [dayCell(row.day)],
           entryCount: row.entryCount,
           totalSeconds: row.totalSeconds,
+          expectedSeconds: null,
         })),
       };
 
@@ -116,6 +144,7 @@ export function describeReport(result: ReportResult): ReportTableModel {
           labels: [nameCell(row.userName, UNKNOWN_PERSON)],
           entryCount: row.entryCount,
           totalSeconds: row.totalSeconds,
+          expectedSeconds: row.expectedSeconds,
         })),
       };
 
@@ -130,6 +159,7 @@ export function describeReport(result: ReportResult): ReportTableModel {
           ],
           entryCount: row.entryCount,
           totalSeconds: row.totalSeconds,
+          expectedSeconds: null,
         })),
       };
 
@@ -144,6 +174,7 @@ export function describeReport(result: ReportResult): ReportTableModel {
           ],
           entryCount: row.entryCount,
           totalSeconds: row.totalSeconds,
+          expectedSeconds: null,
         })),
       };
 
@@ -157,6 +188,7 @@ export function describeReport(result: ReportResult): ReportTableModel {
           labels: [clientCell(row.clientName, NO_CLIENT_GROUP)],
           entryCount: row.entryCount,
           totalSeconds: row.totalSeconds,
+          expectedSeconds: null,
         })),
       };
 
@@ -172,6 +204,7 @@ export function describeReport(result: ReportResult): ReportTableModel {
           ],
           entryCount: row.entryCount,
           totalSeconds: row.totalSeconds,
+          expectedSeconds: row.expectedSeconds,
         })),
       };
   }
@@ -188,16 +221,35 @@ export function describeReport(result: ReportResult): ReportTableModel {
  *
  * Integer seconds throughout (§9.5) — nothing here becomes hours until it is
  * formatted.
+ *
+ * `expectedSeconds` follows the same rule one column across, with the null
+ * handled rather than coerced: a footer of `0:00:00` under a column of blank
+ * cells would be the one place this table asserted that nothing was expected.
+ * It is null unless at least one row carries a figure, which in practice means
+ * all of them do — the task-filter decision (§9.8.2) is taken for the whole
+ * report, not per row — but it is written as "any" so that a future partial
+ * case totals what it has instead of silently reporting nothing.
  */
 export function totalsOf(rows: ReportRow[]): {
   entryCount: number;
   totalSeconds: number;
+  expectedSeconds: number | null;
 } {
-  return rows.reduce(
+  const hasExpected = rows.some((row) => row.expectedSeconds !== null);
+
+  return rows.reduce<{
+    entryCount: number;
+    totalSeconds: number;
+    expectedSeconds: number | null;
+  }>(
     (running, row) => ({
       entryCount: running.entryCount + row.entryCount,
       totalSeconds: running.totalSeconds + row.totalSeconds,
+      expectedSeconds:
+        running.expectedSeconds === null
+          ? null
+          : running.expectedSeconds + (row.expectedSeconds ?? 0),
     }),
-    { entryCount: 0, totalSeconds: 0 },
+    { entryCount: 0, totalSeconds: 0, expectedSeconds: hasExpected ? 0 : null },
   );
 }

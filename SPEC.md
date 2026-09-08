@@ -153,9 +153,27 @@ Controls who may log time where.
 | `project_id` | uuid | Composite PK with `user_id` |
 | `user_id` | uuid | |
 | `company_id` | uuid NOT NULL | Denormalized |
-| `added_at` | timestamptz | |
+| `added_at` | timestamptz | Also the date expected hours start accruing (§9.8) |
+| `expected_daily_seconds` | integer NOT NULL | Default 0. Hours/day this member is expected to work on this project, as integer seconds (§9.5). Zero means no target. |
+| `working_days` | smallint[] NOT NULL | Default `{1,2,3,4,5}`. Postgres `extract(dow)` numbering: 0=Sunday … 6=Saturday. Sorted and de-duplicated by trigger; empty means no working days here. |
 
 **3.6.1 [R] Employees see only their assigned projects.** Admins see all projects in the company regardless of membership. An admin logging time to a project still needs a membership row — assignment governs time entry, role governs visibility.
+
+**3.6.3 [R] The schedule is a property of the assignment, not of the person.** A member's
+expected hours live on the `project_members` row rather than on `profiles`, because the
+same person legitimately works different hours on different projects — 4h/day Mon–Fri on
+one, 3h/day Mon/Tue/Thu/Fri on another. A per-person schedule could not express that
+without inventing an allocation model on top of it. The per-person figure §9.8 reports is
+therefore always a *sum over assignments*, never a stored value, and so it cannot disagree
+with its own line items.
+
+This does mean the schedule is readable by anyone who can read the membership row, which
+`project_members_select_own_company` makes company-wide. That is the same disclosure
+§3.6.1 already accepts for the assignment graph itself. If expected hours later need to be
+private — they are closer to contract data than the rest of this table — the move is a
+separate `project_member_schedules` table with an *own rows or admin* SELECT policy
+mirroring `time_entries_select_own_or_admin`, not a column-level patch: RLS is row-level
+and cannot hide a column from a caller entitled to read the row.
 
 ### 3.7 `time_entries`
 
@@ -602,6 +620,64 @@ Everything else in §9.2 applies unchanged: the same date range, the same four f
 same scoping. An employee filtering by a colleague gets their own rows, because
 `time_entries` SELECT is the boundary and the action replaces the parameter rather than
 forwarding it.
+
+**9.8 [R] Expected hours and attendance.** Every figure in §9.1–§9.7 is an absolute number
+of seconds with nothing to compare it against, which answers *how much* but never *is this
+enough*. §3.6.3's per-assignment schedule supplies the other half, and this section defines
+how the two are put side by side.
+
+**Expected seconds for a person over a range** is the sum, across that person's assignments
+visible to the caller, of `expected_daily_seconds × (number of working days in range)`. The
+day count is generated in SQL, not stored, and four rules fix it:
+
+- **Company-local days, same as everything else (§6.1).** Working days are counted with
+  `(added_at AT TIME ZONE c.timezone)::date` and a `generate_series` over `date`, never
+  `date_trunc` and never UTC. An expected figure bucketed in a different zone from the
+  actuals it sits beside would be wrong in exactly the invisible way §6.1 exists to prevent.
+- **Today counts in full.** The series runs through the range end inclusive, with no
+  proration by time of day. A 4h/day Mon–Fri employee is expected to have logged 20:00:00 by
+  Friday, whatever time on Friday it is. The alternative — prorating today — makes the
+  number move while you look at it and makes two people's figures incomparable unless you
+  also know when each was rendered. The edge says out loud that today is counted whole
+  (§9.8.1), which is cheaper than making the arithmetic clever.
+- **Accrual starts at `added_at`.** Days before the assignment existed contribute nothing,
+  so back-filling an assignment for work already logged does not retroactively invent a
+  shortfall. This falls out of `greatest(p_from, added_at::date)`; there is no branch.
+- **Integer seconds, as everywhere (§9.5).** The admin enters hours and the action stores
+  seconds. An hours-valued column would drift against the `sum(duration_seconds)` it is
+  displayed next to, which is the one thing §9.5 exists to forbid.
+
+**9.8.1 Where it appears.** Two `SECURITY INVOKER` functions —
+`report_expected_by_user` and `report_expected_by_user_project` — mirroring §9.3's
+groupings and taking §9.2's filters. §9.2's scoping applies unchanged: an employee's
+`p_user_id` is replaced with their own, and RLS remains the boundary.
+
+- The **summary header** gains an Expected figure when the report resolves to a single
+  person — always for an employee, and for an admin using the person filter.
+- The **by-user** and **by-user × project** views gain Expected and Difference columns,
+  which is the attendance view, and both carry them into §9.6's CSV.
+- The **employee dashboard** shows worked against expected for the current month to date.
+  It reads `report_summary`, not a second aggregation of its own: a dashboard figure that
+  could disagree with `/reports` would be worse than no figure.
+
+**9.8.2 Two ways the pairing can lie, and what is done about them.**
+
+- **§9.4 excludes running entries from the worked side but not from the expected side.**
+  Someone four hours into an unstopped timer reads as four hours behind. The number is
+  correct and the impression is not, so any surface pairing the two must say the running
+  entry is not counted whenever `running_count > 0`. This is the same disclosure §9.7's
+  detail view makes for the opposite reason.
+- **A task filter makes expected undefined.** Schedules are per project (§3.6.3); there is
+  no such thing as the hours a person owes against one task. The expected functions
+  therefore take no `p_task_id`, and the edge **omits** Expected under a task filter rather
+  than rendering zero — a zero here would read as "expected nothing", which is a stronger
+  and falser claim than showing nothing at all.
+
+**9.8.3 The by-user attendance view is a union, not a join.** §9.3's aggregates return only
+people with entries in the range. Someone who was expected to work 20:00:00 and logged
+nothing produces no `report_by_user` row at all — and is precisely the row an attendance
+report exists to surface. Expected-only people are therefore appended with a zero worked
+total, which is why the expected functions return `user_name` rather than ids alone.
 
 ---
 

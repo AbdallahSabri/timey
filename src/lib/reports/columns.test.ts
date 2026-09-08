@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ReportEntryRow } from "@/lib/actions/reports";
 import {
+  csvForReport,
   csvForReportEntries,
   reportEntriesCsvFilename,
 } from "@/lib/reports/columns";
@@ -247,5 +248,88 @@ describe("reportEntriesCsvFilename", () => {
 
     expect(filename).toMatch(/^timey-entries-[\d-]+-to-[\d-]+\.csv$/);
     expect(filename).not.toMatch(/["\r\n;]/);
+  });
+});
+
+/**
+ * §9.8.1's attendance columns, which are the only cells in the aggregate
+ * exports whose emptiness is a ruling rather than an unreadable label.
+ */
+describe("csvForReport — Expected and Difference", () => {
+  const ADA = {
+    userId: "3f0d3e3a-0e60-4c0e-9b0e-000000000010",
+    userName: "Ada Lovelace",
+    entryCount: 3,
+    totalSeconds: 36_000,
+  };
+
+  it("appends both columns after the durations, matching the screen's order", () => {
+    const csv = csvForReport({
+      grouping: "user",
+      rows: [{ ...ADA, expectedSeconds: 72_000 }],
+    });
+
+    expect(csv.split("\r\n")[0]).toBe(
+      "User,Entries,Duration (seconds),Duration,Expected,Difference",
+    );
+  });
+
+  it("writes a shortfall with an explicit minus, not clamped to zero", () => {
+    // `formatSecondsHms` clamps negatives to "0:00:00". Handed the raw
+    // difference it would export "no difference" for a ten-hour shortfall,
+    // which is the one value this cell must never read as.
+    const csv = csvForReport({
+      grouping: "user",
+      rows: [{ ...ADA, expectedSeconds: 72_000 }],
+    });
+
+    expect(bodyRows(csv)[0]).toBe(
+      "Ada Lovelace,3,36000,10:00:00,20:00:00,-10:00:00",
+    );
+  });
+
+  it("writes a surplus unsigned, so only one direction carries a glyph", () => {
+    const csv = csvForReport({
+      grouping: "user",
+      rows: [{ ...ADA, expectedSeconds: 18_000 }],
+    });
+
+    expect(bodyRows(csv)[0]?.endsWith(",5:00:00,5:00:00")).toBe(true);
+  });
+
+  it("leaves both cells EMPTY under a task filter, never 0:00:00", () => {
+    // §9.8.2 — null means "expected is not a meaningful quantity here", and a
+    // zero in a spreadsheet is a value somebody will sum. Empty is the same
+    // reading every other blank cell in this file has.
+    const csv = csvForReport({
+      grouping: "user",
+      rows: [{ ...ADA, expectedSeconds: null }],
+    });
+
+    expect(bodyRows(csv)[0]).toBe("Ada Lovelace,3,36000,10:00:00,,");
+    expect(csv).not.toContain("0:00:00,0:00:00");
+  });
+
+  it("carries the same two columns into the user x project cross-tab", () => {
+    const csv = csvForReport({
+      grouping: "user-project",
+      rows: [
+        {
+          ...ADA,
+          projectId: "3f0d3e3a-0e60-4c0e-9b0e-000000000011",
+          projectName: "Acme Redesign",
+          clientId: "3f0d3e3a-0e60-4c0e-9b0e-000000000012",
+          clientName: "Acme",
+          expectedSeconds: 36_000,
+        },
+      ],
+    });
+
+    expect(csv.split("\r\n")[0]).toBe(
+      "User,Project,Client,Entries,Duration (seconds),Duration,Expected,Difference",
+    );
+    // Exactly on target reads as an unsigned zero, not as a blank — nothing is
+    // missing here, the two figures simply agree.
+    expect(bodyRows(csv)[0]?.endsWith(",10:00:00,10:00:00,0:00:00")).toBe(true);
   });
 });

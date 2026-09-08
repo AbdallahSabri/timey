@@ -10,6 +10,7 @@
  * tested.
  */
 
+import { differenceSeconds } from "@/components/reports/report-expected";
 import type {
   ReportClientRow,
   ReportDayRow,
@@ -78,9 +79,63 @@ const dayColumns: CsvColumn<ReportDayRow>[] = [
   ...durationColumns<ReportDayRow>(),
 ];
 
+/**
+ * §9.8.1's attendance pair, appended after the duration columns so the file
+ * reads in the same order as the screen: labels, Entries, Duration, Expected,
+ * Difference. `report-rows.ts` states that contract from the other side and a
+ * test asserts it.
+ *
+ * **A null `expectedSeconds` writes both cells EMPTY, never `0:00:00`.** Null
+ * means expected is not a meaningful quantity for this row (§9.8.2's task
+ * filter — schedules are per project, so hours owed against one task is not a
+ * number that exists), and a zero in a spreadsheet is a value somebody will sum.
+ * This is the same reading an empty cell has everywhere else in this file, and
+ * the same choice `entryColumns` makes for a running entry's Duration.
+ *
+ * **Difference carries its sign explicitly**, because `formatSecondsHms` clamps
+ * negatives to `0:00:00` — a shortfall passed to it raw would export as "no
+ * difference", which is the one value it must never read as. The direction
+ * comes from `differenceSeconds` rather than from a subtraction written here,
+ * so the file and the screen cannot disagree about which way behind points.
+ *
+ * Only the `H:MM:SS` form, with no integer sibling. That breaks the pattern
+ * `durationColumns` sets and does so knowingly: a signed cell is not summable
+ * text either way, and the seconds anyone re-summing needs are already in the
+ * file — Expected is `Duration (seconds)` minus the Difference, both of which
+ * are exported beside it.
+ */
+function expectedColumns<
+  Row extends { totalSeconds: number; expectedSeconds: number | null },
+>(): CsvColumn<Row>[] {
+  return [
+    {
+      header: "Expected",
+      value: (row) =>
+        row.expectedSeconds === null
+          ? null
+          : formatSecondsHms(row.expectedSeconds),
+    },
+    {
+      header: "Difference",
+      value: (row) => {
+        const difference = differenceSeconds(
+          row.totalSeconds,
+          row.expectedSeconds,
+        );
+        if (difference === null) {
+          return null;
+        }
+
+        return `${difference < 0 ? "-" : ""}${formatSecondsHms(Math.abs(difference))}`;
+      },
+    },
+  ];
+}
+
 const userColumns: CsvColumn<ReportUserRow>[] = [
   { header: "User", value: (row) => row.userName },
   ...durationColumns<ReportUserRow>(),
+  ...expectedColumns<ReportUserRow>(),
 ];
 
 const projectColumns: CsvColumn<ReportProjectRow>[] = [
@@ -110,6 +165,7 @@ const userProjectColumns: CsvColumn<ReportUserProjectRow>[] = [
   { header: "Project", value: (row) => row.projectName },
   { header: "Client", value: (row) => row.clientName },
   ...durationColumns<ReportUserProjectRow>(),
+  ...expectedColumns<ReportUserProjectRow>(),
 ];
 
 /** The `Status` cell on a running entry. Empty on a closed one — see below. */

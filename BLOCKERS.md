@@ -8,6 +8,44 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-17 · Expected hours — four rulings that fix the arithmetic, 2026-09-08
+
+`SPEC.md` §9.8 pairs actual logged time with an expected figure. Four questions had to be
+answered before any of it could be written, because each one changes the number rather
+than the presentation.
+
+**1. The schedule hangs off the assignment, not the person.** An employee can work 4h/day
+Mon–Fri on one project and 3h/day Mon/Tue/Thu/Fri on another; a `profiles`-level schedule
+cannot express that without an allocation model layered on top. `project_members` gains
+`expected_daily_seconds` and `working_days`, and the per-person figure is always a sum
+over assignments (§3.6.3).
+
+**2. Today counts in full.** Expected runs through the range end inclusive with no
+proration by time of day. Rejected: prorating today, which makes the figure move while
+you look at it and makes two people's numbers incomparable without also knowing when each
+was rendered. The cost is that a mid-morning employee reads as a full day behind, and it
+is paid with a caption rather than with arithmetic.
+
+**3. Accrual starts at `added_at`.** Someone added to a project on the 20th owes nothing
+for the 1st–19th, so back-filling an assignment cannot retroactively invent a shortfall.
+Rejected: a separate `effective_from` column — it is the more general answer, and nothing
+yet needs the generality; `added_at` already records the fact. Revisit if a real contract
+change ever has to be dated independently of when the row was created.
+
+**4. Expected is omitted, not zeroed, under a task filter.** Schedules are per project, so
+"hours owed against one task" is not a quantity. Rendering `0:00:00` would assert that
+nothing was expected, which is a stronger and falser claim than rendering nothing. The
+functions take no `p_task_id` at all, so there is no path by which the edge could ask the
+question (§9.8.2).
+
+**Accepted consequence, recorded so it is a decision and not an oversight:**
+`project_members_select_own_company` is company-wide, so every employee can read every
+colleague's hours/day. That matches the disclosure §3.6.1 already accepts for the
+assignment graph. If it must become private, the move is a separate
+`project_member_schedules` table with an own-rows-or-admin SELECT policy — not a
+column-level patch, because RLS is row-level and cannot hide a column from a caller
+entitled to read the row.
+
 ### D-16 · §12.2's "totals equal their own visible line items" is scoped to aggregate views, 2026-09-02
 
 **`SPEC.md` §9.7 (new), §12.2.** The detail view added to `/reports` lists one row per time

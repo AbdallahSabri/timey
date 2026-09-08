@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { MemberSchedulesDialog } from "@/components/members/member-schedules-dialog";
 import { DataCard, DataCardList } from "@/components/structure/data-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,18 +38,29 @@ import { cn } from "@/lib/utils";
  * this component draws, and their refusals are surfaced verbatim below. The
  * self row never gets role or status controls — §2 forbids an admin changing
  * their own role, and deactivating yourself is a lockout, not a feature.
+ *
+ * **Schedule is the one item on that menu an admin may use on their own row**,
+ * and it is why the dialog is opened outside `rowMenu`'s self check rather than
+ * inside it. Expected hours are a property of an assignment (§3.6.3), not a
+ * permission: an admin who works four hours a day on a project has a schedule
+ * like anyone else, and there is no lockout to protect them from.
  */
 export function MemberList({
   members,
   currentUserId,
   canManage,
+  weekStartsOn,
 }: {
   members: CompanyMember[];
   currentUserId: string | null;
   canManage: boolean;
+  /** `companies.week_starts_on` — orders the schedule dialog's day picker. */
+  weekStartsOn: number;
 }) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
+  /** Whose schedules are on screen, by user id. */
+  const [schedulesFor, setSchedulesFor] = useState<string | null>(null);
 
   async function run(
     userId: string,
@@ -79,7 +91,7 @@ export function MemberList({
   function rowMenu(member: CompanyMember) {
     const isSelf = member.id === currentUserId;
 
-    if (!canManage || isSelf) {
+    if (!canManage) {
       return null;
     }
 
@@ -99,37 +111,62 @@ export function MemberList({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onSelect={() =>
-              void run(
-                member.id,
-                () => updateMemberRole(member.id, nextRole),
-                `${member.fullName} is now ${nextRole === "admin" ? "an admin" : "an employee"}.`,
-              )
-            }
-          >
-            Make {nextRole}
+          {/* Available on the self row too, unlike everything below it: a
+              schedule is a property of an assignment (§3.6.3), not a
+              permission, so there is no self-lockout to guard against. */}
+          <DropdownMenuItem onSelect={() => setSchedulesFor(member.id)}>
+            Schedule
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant={isActive ? "destructive" : "default"}
-            onSelect={() =>
-              void run(
-                member.id,
-                () =>
-                  setMemberStatus(member.id, isActive ? "inactive" : "active"),
-                isActive
-                  ? `${member.fullName} has been deactivated.`
-                  : `${member.fullName} is active again.`,
-              )
-            }
-          >
-            {isActive ? "Deactivate" : "Reactivate"}
-          </DropdownMenuItem>
+
+          {isSelf ? null : (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() =>
+                  void run(
+                    member.id,
+                    () => updateMemberRole(member.id, nextRole),
+                    `${member.fullName} is now ${nextRole === "admin" ? "an admin" : "an employee"}.`,
+                  )
+                }
+              >
+                Make {nextRole}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant={isActive ? "destructive" : "default"}
+                onSelect={() =>
+                  void run(
+                    member.id,
+                    () =>
+                      setMemberStatus(
+                        member.id,
+                        isActive ? "inactive" : "active",
+                      ),
+                    isActive
+                      ? `${member.fullName} has been deactivated.`
+                      : `${member.fullName} is active again.`,
+                  )
+                }
+              >
+                {isActive ? "Deactivate" : "Reactivate"}
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     );
   }
+
+  /**
+   * One dialog for the whole list, for the reason the project page's member
+   * list gives: every row is rendered twice, as a `DataCard` below `md` and as
+   * a table row above it, so a dialog mounted per row would put two open copies
+   * in the DOM — both portalled to the body, where the breakpoint classes that
+   * hide one list cannot reach either.
+   */
+  const showingSchedulesFor =
+    members.find((member) => member.id === schedulesFor) ?? null;
 
   return (
     <>
@@ -199,6 +236,18 @@ export function MemberList({
           </TableBody>
         </Table>
       </div>
+
+      {showingSchedulesFor ? (
+        <MemberSchedulesDialog
+          userId={showingSchedulesFor.id}
+          memberName={showingSchedulesFor.fullName}
+          weekStartsOn={weekStartsOn}
+          open
+          onOpenChange={(next) =>
+            setSchedulesFor(next ? showingSchedulesFor.id : null)
+          }
+        />
+      ) : null}
     </>
   );
 }

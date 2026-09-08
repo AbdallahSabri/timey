@@ -1,4 +1,10 @@
 import { CreateCorrectionDialog } from "@/components/corrections/create-correction-dialog";
+import { MonthProgressCard } from "@/components/dashboard/month-progress-card";
+import {
+  companyToday,
+  formatDayRange,
+  startOfMonth,
+} from "@/components/reports/report-days";
 import { DEFAULT_MAX_TIMER_HOURS } from "@/components/time-entries/elapsed";
 import { EntryList } from "@/components/time-entries/entry-list";
 import { ManualEntryDialog } from "@/components/time-entries/manual-entry-dialog";
@@ -14,6 +20,7 @@ import {
 import { getCurrentMember } from "@/lib/actions/companies";
 import { listMyCorrectionRequests } from "@/lib/actions/corrections";
 import { listProjects } from "@/lib/actions/projects";
+import { getReportSummary } from "@/lib/actions/reports";
 import { getRunningTimer, listMyEntries } from "@/lib/actions/time-entries";
 
 import type { Metadata } from "next";
@@ -40,27 +47,56 @@ const RECENT_ENTRY_LIMIT = 10;
  * badged in the list, so "I asked about this on Monday" is visible where the
  * entry is rather than only on `/corrections`. One indexed read, not one per
  * row.
+ *
+ * **`getCurrentMember()` is awaited before the rest, and has to be**, which is
+ * the same shape `/reports` uses. §9.8's month card needs two things that only
+ * the member can supply: the company timezone, because the month's first and
+ * last day are company-local (§6.1) and computing them in the server's zone
+ * would move a boundary by a day; and the caller's own id, because
+ * `getReportSummary` returns an Expected figure only when the report resolves
+ * to one person (§9.8.1) — an admin who passes no person filter gets a
+ * team-wide report and a null. Both are inputs to the sixth read, so it cannot
+ * sit in the same `Promise.all` as the call that produces them.
  */
 export default async function DashboardPage() {
+  const memberResult = await getCurrentMember();
+  const member = memberResult.ok ? memberResult.data : null;
+  const timezone = member?.company?.timezone ?? null;
+
+  // Month to date, in the company's reckoning of "today" (§6.1). Both ends are
+  // resolved here rather than in the card, which takes seconds and formats
+  // them; and today is the range end because §9.8 counts it in full.
+  const today = companyToday(timezone, Date.now());
+  const monthStart = startOfMonth(today);
+
   const [
-    memberResult,
     runningResult,
     projectsResult,
     entriesResult,
     correctionsResult,
+    monthResult,
   ] = await Promise.all([
-    getCurrentMember(),
     getRunningTimer(),
     listProjects(),
     listMyEntries({ limit: RECENT_ENTRY_LIMIT }),
     listMyCorrectionRequests(),
+    // The sanctioned source of range totals (§9.8.1). Nothing is aggregated in
+    // this page: a dashboard figure computed a second way could disagree with
+    // `/reports`, which would be worse than showing no figure at all.
+    getReportSummary({
+      from: monthStart,
+      to: today,
+      userId: member?.id,
+      clientId: undefined,
+      projectId: undefined,
+      taskId: undefined,
+    }),
   ]);
 
-  const member = memberResult.ok ? memberResult.data : null;
-  const timezone = member?.company?.timezone ?? null;
   const projects = projectsResult.ok ? projectsResult.data : [];
   const running = runningResult.ok ? runningResult.data : null;
   const isAdmin = member?.role === "admin" && member.status === "active";
+  const month = monthResult.ok ? monthResult.data : null;
 
   const pendingCorrectionEntryIds = (
     correctionsResult.ok ? correctionsResult.data : []
@@ -87,6 +123,19 @@ export default async function DashboardPage() {
             : "Signed in."}
         </p>
       </div>
+
+      {/* Above the timer, because it is the question the timer is an answer to:
+          "am I keeping up?" reads first, and the control that changes it sits
+          underneath. Silent when the summary failed — a card with no figures
+          would say less than nothing, and the timer below still works. */}
+      {month ? (
+        <MonthProgressCard
+          workedSeconds={month.totalSeconds}
+          expectedSeconds={month.expectedSeconds}
+          runningCount={month.runningCount}
+          monthLabel={formatDayRange(monthStart, today)}
+        />
+      ) : null}
 
       {!runningResult.ok ? (
         <Card>
