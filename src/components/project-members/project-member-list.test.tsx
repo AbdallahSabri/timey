@@ -1,4 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ProjectMemberList } from "@/components/project-members/project-member-list";
@@ -107,6 +108,59 @@ describe("ProjectMemberList — schedules (§3.6.3)", () => {
         name: /edit hours/i,
       }),
     ).toBeInTheDocument();
+  });
+
+  it("opens the schedule dialog when the edit control is used", async () => {
+    // The seam between the button and the form: every other test here asserts
+    // the control *exists*, and none of them press it. A dialog that never
+    // opens looks exactly like a button that does nothing.
+    const user = userEvent.setup();
+    renderList([member()]);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(
+      within(tableRow("Dana Reyes")).getByRole("button", {
+        name: /edit hours/i,
+      }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: /expected hours for dana/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the dialog on the row's own stored hours", async () => {
+    const user = userEvent.setup();
+    renderList([member({ expectedDailySeconds: 12_600 })]);
+
+    await user.click(
+      within(tableRow("Dana Reyes")).getByRole("button", {
+        name: /edit hours/i,
+      }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText(/hours per day/i)).toHaveValue(3.5);
+  });
+
+  it("closes the dialog again when the edit is abandoned", async () => {
+    const user = userEvent.setup();
+    renderList([member()]);
+
+    await user.click(
+      within(tableRow("Dana Reyes")).getByRole("button", {
+        name: /edit hours/i,
+      }),
+    );
+    await screen.findByRole("dialog");
+
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("offers no edit control on an archived project, where nothing can change", () => {
