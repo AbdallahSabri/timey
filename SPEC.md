@@ -360,6 +360,8 @@ Previously the confirmation link hardcoded `next=/dashboard`, so §8.1 Path B co
 
 **It is attacker-influenceable and is treated as such.** `user_metadata` is writable by its own user, so the value is re-validated through `safeNextPath` on read, exactly like `?next=`. The worst a caller achieves is choosing their own same-origin landing page; an invite token planted there by somebody else still buys nothing, because §8.4.1 checks the caller's address.
 
+**`pending_next` is signup-scoped, and is never cleared.** It is written once, at signup, and outranks the query `next` wherever it is read. That is correct for a confirmation link and wrong for every other kind: while `/auth/confirm` accepted `type` from the query, a recovery token verified there would have hit the same override and sent an invitee to their stale `/invite/<token>` instead of the reset form — into the app, holding a live session, with the password they came to change still in place. The route now hardcodes `type: "signup"`, which is what makes permanent metadata safe to keep: nothing but a signup confirmation can reach the branch that reads it. Recovery has its own route (§8.5).
+
 ### 8.4.2 Inviting an existing member — RULED
 
 An invitation to an address that already belongs to the caller's company is refused at send time, not at redemption.
@@ -567,6 +569,31 @@ Path B — invitee:   receives link → sign up or sign in → profile bound to 
 - **§10 item 5's "email on invite is required" is answered: Resend (`BLOCKERS.md` N-6, closed 2026-08-25).** `createInvitation()` now attempts a send through `src/lib/email/resend.ts` after the invitation row exists, using a server-only `APP_URL` env var to build the link — `InviteLink`'s `window.location.origin` trick isn't available outside a browser. Deliberately best-effort and outside the action's own try/catch: the invitation and its copyable link are the ground truth (`accept_invitation()` never knows or cares how the invitee got the token), so a missing Resend key, a missing `APP_URL`, or a provider outage degrades to `emailSent: false` — the same copyable-link fallback the product already had — rather than turning a created invitation into a reported failure. This is also why a freshly forked template keeps working with zero email configuration, matching `CLAUDE.md`'s "the app still starts without Supabase configured" posture. Only invitation email is in scope here; Supabase Auth's own emails (§8.3.2's confirmation link, password reset) are a separate delivery path GoTrue owns, configured via SMTP on a hosted project rather than through this module.
 - **`invitation_preview(p_token)` was added beyond the three tables/functions this phase's plan named.** `SECURITY DEFINER`, granted to `anon` and `authenticated`, returns only what the invitation email itself would already say (company name, invited email, role, expiry, accepted/expired flags) for a valid token — never `token_hash`, `id`, or `company_id`. Necessary because the accept page must name the company before the invitee has an account at all, and `invitations` SELECT is admin-only; without this function the next implementation pass would have faced a query that only works by loosening that policy, which is the exact failure `write-migrations` exists to prevent (§0.2). It is a token-validity oracle by nature — inherent to any accept endpoint — mitigated by tokens being 256-bit random.
 
+
+### 8.5 Password recovery — RULED
+
+A signed-out user can recover an account they are locked out of. `/forgot-password` takes an address and mails a link; `/auth/reset` exchanges the link's token for a session; `/reset-password` sets the new password and drops the user into the app already signed in.
+
+**Scope is recovery, not password management.** There is no change-password surface for a signed-in user, and `/forgot-password` is a signed-out destination for that reason: a user who already has a session has no need of a link back to where they already are. Adding a settings surface later is additive and unaffected by anything here.
+
+**The request form says the same thing for every address.** One neutral confirmation on success — *if* an account exists, a link is on its way — never an assertion that mail was sent. This extends the rule already governing `invalid_credentials` in `signInErrorMessage`: nothing in the product may answer "does this address have an account".
+
+That rule reaches further than it first appears. `resetPasswordForEmail` returns 200 for an unknown address, so silence is free — but GoTrue enforces `max_frequency` against the *user row*, so an unknown address asked twice returns 200/200 while a known one returns 200 then 429. **`over_email_send_rate_limit` is therefore reported as success, not as a rate-limit message**, or the second click becomes the oracle the first one closed. It is not a lie either: the code means a mail was recently sent to that address, which is exactly what the neutral copy claims. Only a malformed address — a fact about the input, not about any account — is allowed to refuse.
+
+**A dedicated `/auth/reset`, not a `type` parameter on `/auth/confirm`.** Reuse looked free, because that route already read both `type` and `next` from the query. It was not:
+
+- Its failure copy is signup-specific — *"Sign in, or sign up again to get a new one"* is wrong advice for a dead reset link.
+- `next` would be caller-controlled on the highest-value token in the system. A recovery token grants a session, so neither the OTP type nor the landing page should be something the emailed URL gets a vote on. Both are hardcoded in `/auth/reset`, whose link carries `token_hash` and nothing else.
+- It would have inherited the `pending_next` defect below.
+
+**`/reset-password` is reachable in every auth state, and gated by a marker cookie.** Middleware's public early return is the only exit before the profile lookup, so any other placement bounces a limbo invitee to `/onboarding` before they can set a password — and an invited employee who never onboarded is precisely the person a recovery link has to work for. Passing that early return would otherwise hand an ordinary signed-in user a working change-password form, so `/auth/reset` sets a short-lived `httpOnly` marker immediately before redirecting and the page refuses to render without it.
+
+The cookie carries no secret and cannot: a cookie this server sets is one the browser holding it can replay. The authority is the session `verifyOtp` created — without it `updateUser({ password })` fails with `AuthSessionMissingError` whatever cookies arrive. **It protects the route from being a change-password surface; it does not protect the password.**
+
+**Accepted, knowingly: an emailed GET link can be consumed by an email scanner.** Outlook Safe Links and corporate AV follow links in mail. For a signup confirmation that costs a re-send; for a recovery the scanner ends up holding a live session cookie, and the real user finds a dead link. PKCE's code-plus-verifier is the standard mitigation and §8.1.2 rules it out for the reasons given there. Recorded here so it is a known cost rather than a later discovery. The exposure is bounded by `otp_expiry` and by the token being single-use.
+
+**The hosted email template is a deploy step, not a code artifact.** `supabase/config.toml` binds the local container only. Until "Reset Password" is pasted into the project's dashboard, production sends GoTrue's default `{{ .ConfirmationURL }}` mail, which lands the session as a URL fragment no server can read — the flow then fails in production only, which is the `BLOCKERS.md` D-15 shape.
+
 ---
 
 ## 9. Reporting
@@ -741,6 +768,18 @@ Run after any migration touching RLS or `time_entries`. Two browser profiles, tw
 - [ ] Employee cannot see a project they aren't a member of
 - [ ] A user from Company 2 sees nothing belonging to Company 1
 - [ ] Employee hitting an admin route directly by URL is blocked, not just hidden from the nav
+
+**Password recovery (§8.5)** — against a real stack, mail read in Mailpit (`http://127.0.0.1:54524`). Leave `enable_confirmations = false` alone: it gates the *signup* mail only, and `POST /recover` sends regardless. Flipping it is what destroyed the local database in D-14.
+- [ ] Unknown address → the neutral confirmation, and **no mail in Mailpit**
+- [ ] Known address → mail arrives, linking to `/auth/reset?token_hash=…` on the app's own origin, with no URL fragment
+- [ ] Same known address requested twice in quick succession → still the neutral confirmation, never a rate-limit message (the enumeration oracle, §8.5)
+- [ ] Follow the link, set a new password → lands signed in on `/dashboard`
+- [ ] The old password no longer signs in; the new one does
+- [ ] **The invitee case:** an account created through `/sign-up?next=/invite/<token>` (so it carries `pending_next`) resets and reaches the reset form, *not* the stale invite
+- [ ] **The limbo case:** an invitee who never onboarded resets, sets a password, and lands on `/onboarding` rather than a bounce loop
+- [ ] A used or expired link → `/forgot-password` with the error above a working request form
+- [ ] Signed in as an ordinary member, type `/reset-password` → `/dashboard`, no form
+- [ ] Follow the same link a second time → refused
 
 **Timer constraints**
 - [ ] Two tabs, both press Start → second fails with a readable message, not a second timer

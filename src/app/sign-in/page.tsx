@@ -64,7 +64,10 @@ export default async function SignInPage({
           ) : null}
           <SignInForm next={destination} />
         </CardContent>
-        <CardFooter>
+        {/* Stacked rather than sat side by side: two short sentences on one
+            row wrap into each other at phone widths, and the second line is
+            the one a locked-out user is scanning for. */}
+        <CardFooter className="flex-col items-start gap-1">
           <p className="text-muted-foreground text-sm">
             No account yet?{" "}
             <Link
@@ -72,6 +75,16 @@ export default async function SignInPage({
               className="text-foreground underline underline-offset-4"
             >
               Create one
+            </Link>
+          </p>
+          {/* No `next`: recovery lands on `/reset-password` by way of the
+              emailed link, which carries no destination of its own (§8.5). */}
+          <p className="text-muted-foreground text-sm">
+            <Link
+              href="/forgot-password"
+              className="text-foreground underline underline-offset-4"
+            >
+              Forgot your password?
             </Link>
           </p>
         </CardFooter>

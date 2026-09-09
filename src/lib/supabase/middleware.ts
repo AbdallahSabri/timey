@@ -4,14 +4,36 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/types/supabase";
 
 /**
- * Reachable in any auth state — the health probe, and (`BLOCKERS.md` N-3) the
- * email-confirmation callback: its visitor has no session yet by definition,
- * and `verifyOtp()` is what creates one, inside the route itself.
+ * Reachable in any auth state:
+ *
+ * - `/api/health` — the container probe, which must answer before anything
+ *   about a visitor is known.
+ * - `/auth/confirm` (`BLOCKERS.md` N-3) — the email-confirmation callback. Its
+ *   visitor has no session yet by definition, and `verifyOtp()` is what creates
+ *   one, inside the route itself.
+ * - `/auth/reset` (§8.5) — the recovery callback, for the same reason: the
+ *   token in its query string *is* the credential, and the session does not
+ *   exist until the route exchanges it.
+ * - `/reset-password` (§8.5) — and this is the only set that works for it. The
+ *   early return below is the only exit before the profile lookup, so in
+ *   `SIGNED_OUT_PATHS` a limbo invitee holding a fresh recovery session would
+ *   be bounced to `/onboarding` and a company member to `/dashboard`, and in
+ *   neither set the limbo case still fails at the same place. An invited
+ *   employee who never onboarded is exactly the population that needs a
+ *   recovery link to work, so nothing that bounces them is acceptable. Passing
+ *   here is not an unguarded surface: the page itself refuses to render without
+ *   the marker cookie `/auth/reset` sets (`lib/auth/recovery.ts`), so a
+ *   signed-in user typing the URL gets no change-password form.
  *
  * The marketing root is deliberately absent. It is public to a signed-out
  * visitor but not to a signed-in one, so it belongs in `SIGNED_OUT_PATHS`.
  */
-const PUBLIC_PATHS = new Set(["/api/health", "/auth/confirm"]);
+const PUBLIC_PATHS = new Set([
+  "/api/health",
+  "/auth/confirm",
+  "/auth/reset",
+  "/reset-password",
+]);
 
 /**
  * Destinations for a signed-out visitor only.
@@ -21,8 +43,22 @@ const PUBLIC_PATHS = new Set(["/api/health", "/auth/confirm"]);
  * ended at the dashboard — via a bounce off `/sign-in` — so this makes the
  * route say directly what the click was going to say anyway, one redirect
  * earlier. A limbo user is parked at onboarding first, by the guard below.
+ *
+ * `/forgot-password` joins them (§8.5) rather than `PUBLIC_PATHS`: asking for a
+ * recovery link is a signed-out act, and a user who already has a session has
+ * no need of one — the product offers no change-password surface, so bouncing
+ * them onward is the honest answer rather than a form that would only mail them
+ * a link back to where they already are. It is also what makes
+ * `/reset-password`'s missing-cookie redirect terminate correctly in every
+ * state: a member sent here lands on `/dashboard`, a limbo invitee on
+ * `/onboarding`, and only a signed-out visitor sees the request form.
  */
-const SIGNED_OUT_PATHS = new Set(["/", "/sign-in", "/sign-up"]);
+const SIGNED_OUT_PATHS = new Set([
+  "/",
+  "/sign-in",
+  "/sign-up",
+  "/forgot-password",
+]);
 
 /**
  * §8.1 Path B, §8.4. The one prefix rule here, because the route is

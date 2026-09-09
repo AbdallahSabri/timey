@@ -65,6 +65,24 @@ export const signInSchema = z.object({
 });
 
 /**
+ * §8.5. Only the address — the recovery destination is fixed by the email
+ * template (`{{ .SiteURL }}/auth/reset?token_hash=…`), never by the request,
+ * because `next` on a token that grants a session is caller-controlled reach.
+ */
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+/**
+ * The new password after a recovery link, so it carries the full strength rules
+ * `signUpSchema` does — this is the one other place in the product where a
+ * password is *chosen* rather than typed back.
+ */
+export const resetPasswordSchema = z.object({
+  password: passwordSchema,
+});
+
+/**
  * `Intl` carries the IANA database the runtime already ships — cheaper and
  * more current than any list we could hand-roll. The authoritative check still
  * happens in Postgres (`companies_validate_timezone` against
@@ -137,6 +155,8 @@ export const createCompanySchema = z.object({
 
 export type SignUpInput = z.infer<typeof signUpSchema>;
 export type SignInInput = z.infer<typeof signInSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
 /** What `createCompany()` accepts — strings from form controls included. */
 export type CreateCompanyInput = z.input<typeof createCompanySchema>;

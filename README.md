@@ -107,6 +107,17 @@ gate red. That is the only reason the script exists.
 4. Copy the Project URL and anon key from **Settings → API** into `.env.local` and into your host's env config
    (see "Deploy on Coolify").
 5. Regenerate `src/types/supabase.ts` against the real schema.
+6. **Paste the email templates by hand**, under **Authentication → Emails**: `supabase/templates/confirmation.html`
+   into "Confirm signup", and `supabase/templates/recovery.html` into "Reset Password". `supabase/config.toml` is
+   local-only and none of it reaches a hosted project.
+
+   This is not cosmetic. Both hosted defaults use `{{ .ConfirmationURL }}`, which lands the session as a **URL
+   fragment** that no server can read; the repo's templates instead point at `/auth/confirm` and `/auth/reset`,
+   which exchange the token server-side so the session arrives as a cookie. Skip this and signup confirmation and
+   password reset both break in production only (`BLOCKERS.md` D-8, D-18). Check **Authentication → URL
+   Configuration**'s Site URL points at the app's origin while you are there — every emailed link is built from it —
+   and that "Secure password change" is off, or `updateUser({ password })` demands a nonce the reset flow never
+   collects.
 
 Use `pnpm exec` rather than a global `supabase`: the CLI is a devDependency, so this runs the version the repo
 was built against instead of whatever happens to be on your PATH.
@@ -182,6 +193,9 @@ RLS-adjacent surface, and the automated suite verifies none of it.
 | `/` | Anyone | Marketing root |
 | `/sign-up`, `/sign-in` | Signed out | Auth surface |
 | `/auth/confirm` | Any state | Exchanges an emailed `token_hash` for a session, then redirects |
+| `/forgot-password` | Signed out | Requests a password-reset link. Says the same thing whether or not the address has an account |
+| `/auth/reset` | Any state | Exchanges a recovery `token_hash` for a session, then sends you to `/reset-password` |
+| `/reset-password` | Any state | Sets a new password. Renders only for a visitor holding the marker cookie `/auth/reset` sets |
 | `/onboarding` | Signed in, no company | Create a company and become its admin. The only valid `company_id IS NULL` state |
 | `/invite/[token]` | Any state | Accept an invitation; refuses plainly if you already belong to a company |
 | `/dashboard` | Members | The running timer, today's entries, manual entry, the stale-timer prompt |
@@ -223,7 +237,7 @@ src/
   types/              generated Database types
   middleware.ts       session refresh + the limbo/auth guard
 supabase/migrations/  SQL migrations (see above)
-supabase/templates/   confirmation email override
+supabase/templates/   confirmation and recovery email overrides
 .claude/agents/       build-ui, implement-logic, write-migrations, code-reviewer, test-runner
 ```
 

@@ -4,17 +4,23 @@ import { type NextRequest } from "next/server";
 import { PENDING_NEXT_KEY, safeNextPath } from "@/components/auth/next-path";
 import { createClient } from "@/lib/supabase/server";
 
-import type { EmailOtpType } from "@supabase/supabase-js";
-
 /**
  * §8.3's other half of account creation (`BLOCKERS.md` N-3): the link
  * Supabase emails after `signUp()` reports `confirmationRequired: true`.
  *
- * `supabase/templates/confirmation.html` points here with `token_hash` and
- * `type` in the query string, rather than at Supabase's own hosted verify
- * endpoint — GoTrue's default template lands the session as a URL fragment,
- * which no server here can read. This route exchanges the token for a session
- * server-side, so it arrives as a cookie the way every other sign-in does.
+ * `supabase/templates/confirmation.html` points here with `token_hash` in the
+ * query string, rather than at Supabase's own hosted verify endpoint — GoTrue's
+ * default template lands the session as a URL fragment, which no server here
+ * can read. This route exchanges the token for a session server-side, so it
+ * arrives as a cookie the way every other sign-in does.
+ *
+ * The OTP type is **hardcoded** rather than read from the query. It used to be
+ * `searchParams.get("type") as EmailOtpType`, which asserted nothing —
+ * `EmailOtpType` includes `(string & {})`, so the union absorbs any string and
+ * the cast was decorative. Everything below this line is signup-shaped (the
+ * `pending_next` read, the `/dashboard` default, the failure copy on
+ * `/sign-in`), so the type it verifies has to be signup too. Recovery has its
+ * own route, `/auth/reset`.
  *
  * A route handler, not a Server Component: `verifyOtp()` must run and its
  * cookies must be written before any redirect, and only a route handler
@@ -27,10 +33,9 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const tokenHash = searchParams.get("token_hash");
-  const type = searchParams.get("type") as EmailOtpType | null;
   const queryNext = safeNextPath(searchParams.get("next"), "/dashboard");
 
-  if (tokenHash && type) {
+  if (tokenHash) {
     // `redirect()` throws by design (Next's own control-flow signal for a
     // Route Handler), so it must never sit inside this try — catching it here
     // would swallow the navigation instead of performing it. Only the
@@ -42,7 +47,7 @@ export async function GET(request: NextRequest) {
     try {
       const supabase = await createClient();
       const { data, error } = await supabase.auth.verifyOtp({
-        type,
+        type: "signup",
         token_hash: tokenHash,
       });
       verified = !error;
@@ -59,6 +64,16 @@ export async function GET(request: NextRequest) {
       // overrides the query value because it was chosen at signup, when the
       // invitation was in hand, whereas the query default is a generic
       // `/dashboard`.
+      //
+      // It is written once and **never cleared**, which is why the hardcoded
+      // `type: "signup"` above is load-bearing rather than tidiness. While this
+      // route accepted `type` from the query, a *recovery* token verified here
+      // would have hit this same override and sent an invitee to their stale
+      // `/invite/<token>` instead of the reset form — into the app, holding a
+      // live session, with the password they came to change still in place. A
+      // reset that silently does nothing, for exactly the people most likely to
+      // need one. Scoping the route to signup is what makes permanent metadata
+      // safe to keep: nothing but a signup confirmation can reach this branch.
       const stashed = data.user?.user_metadata?.[PENDING_NEXT_KEY];
       if (verified && typeof stashed === "string") {
         next = safeNextPath(stashed, queryNext);

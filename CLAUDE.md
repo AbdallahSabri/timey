@@ -52,6 +52,7 @@ Subagents in `.claude/agents/` are scoped by verb, not role. Route work by file 
 | `src/lib/validations/**` | `implement-logic` | zod schemas |
 | `src/lib/time/**` | `implement-logic` | Company-timezone wall-clock resolution shared across actions — extracted so `'use server'` modules don't duplicate DST-sensitive logic |
 | `src/lib/email/**` | `implement-logic` | Transactional email delivery (Resend), shared across actions — never throws, `{ ok: false }` on any missing config or provider failure |
+| `src/lib/auth/**` | `implement-logic` | Auth-flow state a `'use server'` module can't publish — the `/reset-password` recovery cookie, shared by a route handler, a page and an action |
 | `src/app/api/**` | `implement-logic` | Route handlers |
 | `src/types/**` | `implement-logic` | Database types |
 | Anything, read-only | `code-reviewer` | Run after each milestone, before commit. Never edits. |
