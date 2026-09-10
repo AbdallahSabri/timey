@@ -251,6 +251,13 @@ otp_expiry = 3600
 subject = "Confirm your email for Timey"
 content_path = "./supabase/templates/confirmation.html"
 
+# Points the "reset password" email at this app's own /auth/reset route
+# instead of Supabase's hosted verify endpoint, whose default template lands
+# the session as a URL fragment no server here can read.
+[auth.email.template.recovery]
+subject = "Reset your password for Timey"
+content_path = "./supabase/templates/recovery.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

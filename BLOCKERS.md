@@ -8,6 +8,69 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-18 · Password recovery built, and a latent `pending_next` hijack closed with it, 2026-09-09
+
+**`SPEC.md` §8.5 (new), §8.1.2 (amended).** Timey had no account recovery at all — a
+forgotten password locked a user out for good. D-14 is the proof it mattered: when the
+local database was destroyed, the user's own account had to be recreated *"with a new
+password"* because nothing else could reach it.
+
+`/forgot-password` → `requestPasswordReset()` → GoTrue mails
+`supabase/templates/recovery.html` → `/auth/reset` exchanges `token_hash` via
+`verifyOtp({ type: "recovery" })` → `/reset-password` → `updatePassword()`, and the user is
+already signed in when it lands.
+
+**A defect found on the way in, and fixed at the root.** `/auth/confirm` read its OTP
+`type` from the query string, and that cast asserted nothing — `EmailOtpType` includes
+`(string & {})`, so the union absorbs any string. Meanwhile `user_metadata.pending_next` is
+written once at signup (only when signup carried a `?next=`, i.e. for **invited
+employees**), read only there, and never cleared — and it *overrides* the query `next`. Put
+together: a recovery token verified through that route would have redirected an invitee to
+their stale `/invite/<token>` instead of the reset form, landing them in the app holding a
+live session with the password they came to change still in place. A reset that silently
+does nothing, for exactly the population most likely to need one.
+
+Fixed by hardcoding `type: "signup"` rather than by guarding the read: `pending_next` is a
+signup-scoped concept, and scoping the route is what makes permanent metadata safe to keep.
+This was latent, not live — nothing minted recovery tokens before now — but it was reachable
+by anyone who could put `type=recovery` in a URL. `src/app/auth/confirm/route.test.ts` is
+the regression net, and it is the first test in this repo to mock a Supabase client.
+
+**Why a separate `/auth/reset` rather than a `type` on `/auth/confirm`.** The failure copy on
+`/sign-in?error=confirmation_failed` tells the user to sign up again, which is wrong advice
+for a dead reset link; and `next` would be caller-controlled on a token that grants a
+session. The recovery link now carries `token_hash` and nothing else.
+
+**`/reset-password` sits in `PUBLIC_PATHS` and gates itself on a marker cookie.** That set's
+early return is the only exit before the profile lookup, so anywhere else bounces a limbo
+invitee to `/onboarding` before they can set a password — and an invited employee who never
+onboarded is precisely who needs the link to work.
+
+The marker's value is the user id `verifyOtp` returned, not a bare flag, and the gate refuses
+unless it names the user the request is authenticated as — a browser-scoped marker would have
+handed the form to whoever signed in next on a shared machine, changing *their* password with
+no old password asked for. The check runs inside `updatePassword` as well as on the page: a
+server action is network-reachable, so a page-only gate is one a crafted POST walks past
+(§4.2.2, §8.1.1). It carries no secret and cannot; the `verifyOtp` session is the authority,
+and a user id is an identifier, not a credential.
+
+**The rate-limit message is reported as success, on purpose.** GoTrue enforces
+`max_frequency` against the user row, so an unknown address asked twice gets 200/200 and a
+known one 200 then 429 — surfacing `over_email_send_rate_limit` would rebuild the
+enumeration oracle that the neutral copy exists to close.
+
+**Deploy-ordering hazard, the D-15 shape.** `supabase/config.toml` binds the local container
+only. The hosted project needs "Reset Password" pasted into Auth → Email Templates, or
+production sends GoTrue's default `{{ .ConfirmationURL }}` mail, which lands the session as
+a URL fragment no server can read — and it fails in production only. Confirm "Secure
+password change" is off there too, or `updateUser({ password })` demands a nonce this flow
+never collects.
+
+**Not verified against a live stack yet.** The gate is green and the flow is covered by unit
+tests, but `SPEC.md` §12.2's new auth block — real mail in Mailpit, the invitee case, the
+limbo case, an expired link — has not been walked. Per `BLOCKERS.md` N-2, that means this is
+not done.
+
 ### D-17 · Expected hours — four rulings that fix the arithmetic, 2026-09-08
 
 `SPEC.md` §9.8 pairs actual logged time with an expected figure. Four questions had to be
