@@ -35,30 +35,44 @@ export async function GET(request: NextRequest) {
   if (tokenHash) {
     // `redirect()` throws by design (Next's own control-flow signal for a
     // Route Handler), so it must never sit inside this try — catching it here
-    // would swallow the navigation instead of performing it. Only the Supabase
-    // call and the cookie write are guarded: an unconfigured project throwing
-    // here gets the same refusal a bad, used or expired token gets below, and
-    // there is nothing this route can do differently for either case.
-    let verified = false;
+    // would swallow the navigation instead of performing it. Only the
+    // verification is guarded, and only its *outcome* leaves the block: an
+    // unconfigured project throwing here gets the same refusal a bad, used or
+    // expired token gets below, because in both cases no session was created
+    // and there is nothing else the route could offer.
+    //
+    // The cookie write is deliberately outside. `verifyOtp` writes GoTrue's
+    // session cookies as it succeeds, so once it has, the browser is signed in
+    // whatever happens next — and a cookie failure caught in here would look
+    // exactly like a failed verification, sending an already-signed-in user to
+    // `/forgot-password`, from where middleware carries them straight into the
+    // app with the password they came to change still in place. That is the
+    // silent no-op reset D-18 closed, arrived at from the other side. So the
+    // verification's outcome is latched here and acted on below: a token that
+    // verified either reaches the form or fails loudly, never quietly.
+    let recoveringUserId: string | null = null;
     try {
       const supabase = await createClient();
-      const { error } = await supabase.auth.verifyOtp({
+      const { data, error } = await supabase.auth.verifyOtp({
         type: "recovery",
         token_hash: tokenHash,
       });
-      verified = !error;
-
-      // Only after the session exists. The cookie is a marker for the page's
-      // own gate (`lib/auth/recovery.ts`) — it carries no secret, and setting
-      // it without a session would just produce a form that cannot submit.
-      if (verified) {
-        await setRecoveryCookie();
+      // A verified recovery always carries the user it verified. Reading the id
+      // from the response rather than from anything in the request is what lets
+      // the marker be bound to a person (`lib/auth/recovery.ts`); no id means
+      // no binding is possible, so it is refused rather than guessed.
+      if (!error) {
+        recoveringUserId = data.user?.id ?? null;
       }
     } catch {
-      verified = false;
+      recoveringUserId = null;
     }
 
-    if (verified) {
+    if (recoveringUserId) {
+      // The marker for the page's own gate. It carries no secret — the session
+      // just written is the authority — and it names the user so that a later
+      // visitor to the same browser cannot inherit the form.
+      await setRecoveryCookie(recoveringUserId);
       redirect("/reset-password");
     }
   }

@@ -44,9 +44,15 @@ session. The recovery link now carries `token_hash` and nothing else.
 **`/reset-password` sits in `PUBLIC_PATHS` and gates itself on a marker cookie.** That set's
 early return is the only exit before the profile lookup, so anywhere else bounces a limbo
 invitee to `/onboarding` before they can set a password — and an invited employee who never
-onboarded is precisely who needs the link to work. The cookie stops the route from doubling
-as the change-password surface the product does not offer. It carries no secret and cannot;
-the `verifyOtp` session is the authority.
+onboarded is precisely who needs the link to work.
+
+The marker's value is the user id `verifyOtp` returned, not a bare flag, and the gate refuses
+unless it names the user the request is authenticated as — a browser-scoped marker would have
+handed the form to whoever signed in next on a shared machine, changing *their* password with
+no old password asked for. The check runs inside `updatePassword` as well as on the page: a
+server action is network-reachable, so a page-only gate is one a crafted POST walks past
+(§4.2.2, §8.1.1). It carries no secret and cannot; the `verifyOtp` session is the authority,
+and a user id is an identifier, not a credential.
 
 **The rate-limit message is reported as success, on purpose.** GoTrue enforces
 `max_frequency` against the user row, so an unknown address asked twice gets 200/200 and a

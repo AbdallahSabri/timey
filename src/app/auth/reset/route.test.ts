@@ -19,12 +19,16 @@ vi.mock("@/lib/supabase/server", () => ({
 
 /**
  * The real one writes through `cookies()` from `next/headers`, which has no
- * request context here. Mocked to observe *that* it is set, and when.
+ * request context here. Mocked to observe *that* it is set, with what, and
+ * when; `recovery.test.ts` covers the real implementation and its user
+ * binding directly, so nothing about the module is only ever seen as this stub.
  */
-const setRecoveryCookie = vi.fn(async () => {});
+const setRecoveryCookie = vi.fn<(userId: string) => Promise<void>>(
+  async () => {},
+);
 
 vi.mock("@/lib/auth/recovery", () => ({
-  setRecoveryCookie: () => setRecoveryCookie(),
+  setRecoveryCookie: (userId: string) => setRecoveryCookie(userId),
 }));
 
 const redirect = vi.fn((destination: string) => {
@@ -36,9 +40,13 @@ vi.mock("next/navigation", () => ({
 }));
 
 const INVALID = "/forgot-password?error=reset_link_invalid";
+const USER_ID = "11111111-1111-4111-8111-111111111111";
 
 function verified(userMetadata: Record<string, unknown> = {}) {
-  return { data: { user: { user_metadata: userMetadata } }, error: null };
+  return {
+    data: { user: { id: USER_ID, user_metadata: userMetadata } },
+    error: null,
+  };
 }
 
 async function destinationFor(url: string): Promise<string> {
@@ -72,6 +80,47 @@ describe("GET /auth/reset", () => {
 
     expect(setRecoveryCookie).toHaveBeenCalledTimes(1);
     expect(destination).toBe("/reset-password");
+  });
+
+  // The marker names the user `verifyOtp` just verified, and takes it from the
+  // response rather than from anything in the request — that binding is what
+  // stops the next person on a shared browser inheriting the form.
+  it("binds the marker to the user the token verified", async () => {
+    verifyOtp.mockResolvedValue(verified());
+
+    await destinationFor("https://timey.test/auth/reset?token_hash=abc");
+
+    expect(setRecoveryCookie).toHaveBeenCalledWith(USER_ID);
+  });
+
+  // A verified token means GoTrue's session cookies are already written, so a
+  // later failure must not be reported as a failed verification: sending a
+  // signed-in user to `/forgot-password` lets middleware carry them into the
+  // app with the password they came to change still in place. The cookie write
+  // therefore sits outside the try, and a throw from it fails loudly rather
+  // than becoming a silent no-op reset.
+  it("never turns a verified token into a refusal when the cookie write fails", async () => {
+    verifyOtp.mockResolvedValue(verified());
+    setRecoveryCookie.mockRejectedValueOnce(new Error("cookie jar closed"));
+
+    await expect(
+      GET(new NextRequest("https://timey.test/auth/reset?token_hash=abc")),
+    ).rejects.toThrow("cookie jar closed");
+
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  // Nothing GoTrue returns looks like this, and it is refused rather than
+  // guessed at: with no id there is no user to bind the marker to.
+  it("refuses a verification that carries no user", async () => {
+    verifyOtp.mockResolvedValue({ data: { user: null }, error: null });
+
+    const destination = await destinationFor(
+      "https://timey.test/auth/reset?token_hash=abc",
+    );
+
+    expect(setRecoveryCookie).not.toHaveBeenCalled();
+    expect(destination).toBe(INVALID);
   });
 
   // The regression test for the defect. An invitee who signed up through

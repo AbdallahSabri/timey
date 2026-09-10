@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { ResetPasswordForm } from "@/components/auth/reset-password-form";
@@ -5,10 +6,11 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { hasRecoveryCookie } from "@/lib/auth/recovery";
+import { isRecoveryUnlocked } from "@/lib/auth/recovery";
 
 import type { Metadata } from "next";
 
@@ -19,12 +21,15 @@ export const metadata: Metadata = {
 /**
  * §8.5. Renders only for someone who followed a live recovery link.
  *
- * The gate is the marker cookie `/auth/reset` sets on its way here, because
- * this route has to sit in middleware's `PUBLIC_PATHS` for a limbo invitee to
- * reach it at all — and everything else that passes that early return would
- * otherwise get a working change-password form, a surface the product does not
- * offer. The cookie is a route gate, not a credential: the authority is the
- * recovery session, without which `updatePassword` refuses regardless.
+ * The gate is the marker cookie `/auth/reset` sets on its way here, matched
+ * against the user this request is authenticated as, because this route has to
+ * sit in middleware's `PUBLIC_PATHS` for a limbo invitee to reach it at all —
+ * and everything else that passes that early return would otherwise get a
+ * working change-password form, a surface the product does not offer. The
+ * comparison lives in `lib/auth/recovery.ts`, not here: a Server Component
+ * calls an action or a helper, it does not query Supabase inline. The cookie is
+ * a route gate, not a credential: the authority is the recovery session,
+ * without which `updatePassword` refuses regardless.
  *
  * **The refusal is a redirect, not a terminal screen**, and it composes with
  * middleware to land every state somewhere useful: a signed-in member is
@@ -35,7 +40,7 @@ export const metadata: Metadata = {
  * of on a message telling them they cannot be here.
  */
 export default async function ResetPasswordPage() {
-  if (!(await hasRecoveryCookie())) {
+  if (!(await isRecoveryUnlocked())) {
     redirect("/forgot-password?error=reset_link_invalid");
   }
 
@@ -52,6 +57,17 @@ export default async function ResetPasswordPage() {
         <CardContent>
           <ResetPasswordForm />
         </CardContent>
+        <CardFooter>
+          <p className="text-muted-foreground text-sm">
+            Link expired?{" "}
+            <Link
+              href="/forgot-password"
+              className="text-foreground underline underline-offset-4"
+            >
+              Request a new one
+            </Link>
+          </p>
+        </CardFooter>
       </Card>
     </main>
   );

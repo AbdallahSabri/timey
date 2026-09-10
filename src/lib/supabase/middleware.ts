@@ -21,9 +21,11 @@ import type { Database } from "@/types/supabase";
  *   neither set the limbo case still fails at the same place. An invited
  *   employee who never onboarded is exactly the population that needs a
  *   recovery link to work, so nothing that bounces them is acceptable. Passing
- *   here is not an unguarded surface: the page itself refuses to render without
- *   the marker cookie `/auth/reset` sets (`lib/auth/recovery.ts`), so a
- *   signed-in user typing the URL gets no change-password form.
+ *   here is not an unguarded surface: the page itself refuses to render unless
+ *   the marker cookie `/auth/reset` sets names the very user the request is
+ *   authenticated as (`lib/auth/recovery.ts`), so a signed-in user typing the
+ *   URL gets no change-password form — neither one who never followed a link,
+ *   nor one who arrives on a browser where somebody else did.
  *
  * The marketing root is deliberately absent. It is public to a signed-out
  * visitor but not to a signed-in one, so it belongs in `SIGNED_OUT_PATHS`.

@@ -4,7 +4,7 @@ import { isAuthSessionMissingError } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 
 import { PENDING_NEXT_KEY, safeNextPath } from "@/components/auth/next-path";
-import { clearRecoveryCookie } from "@/lib/auth/recovery";
+import { clearRecoveryCookie, isRecoveryUnlocked } from "@/lib/auth/recovery";
 import { createClient } from "@/lib/supabase/server";
 import {
   forgotPasswordSchema,
@@ -40,6 +40,30 @@ function firstIssue(
   fallback: string,
 ): string {
   return error.issues[0]?.message ?? fallback;
+}
+
+/**
+ * Clearing the marker cookie can never be the reason an action reports failure.
+ *
+ * By the time either caller reaches this, the thing the user asked for has
+ * already happened — the password is changed, or the session is ended — and the
+ * cookie delete is bookkeeping after the fact. Left inside the try/catch that
+ * maps a missing Supabase configuration to `NOT_CONFIGURED`, a throw from here
+ * would tell the user their successful password change was an unconfigured
+ * project; they would not navigate, would retry, and would be told "That is
+ * already your password." about the password they just set.
+ *
+ * A stale marker is harmless by construction (§8.5): the gate at
+ * `/reset-password` compares it against the current session's user, and
+ * `updateUser` still needs the recovery session GoTrue holds. So there is
+ * nothing to report and nothing to undo.
+ */
+async function clearRecoveryMarker(): Promise<void> {
+  try {
+    await clearRecoveryCookie();
+  } catch {
+    // Deliberately swallowed — see above.
+  }
 }
 
 function signUpErrorMessage(error: AuthError): string {
@@ -102,21 +126,34 @@ function requestPasswordResetErrorMessage(error: AuthError): string {
   }
 }
 
+const EXPIRED_LINK_MESSAGE = "That reset link has expired. Request a new one.";
+
+/**
+ * Every way `updateUser` can say "the recovery session is gone", in one place:
+ * it decides both the message and whether the marker cookie is cleared, and
+ * those two must never disagree.
+ *
+ * `isAuthSessionMissingError` is checked first and separately because that one
+ * has no code. With no session at all `updateUser` returns
+ * `AuthSessionMissingError`, whose `code` is `undefined` and whose `status` is
+ * 400 — a `switch (error.code)` would drop it on `default` and report a generic
+ * failure, when the actual cause has a specific and actionable answer.
+ */
+function isRecoverySessionGone(error: AuthError): boolean {
+  return (
+    isAuthSessionMissingError(error) ||
+    error.code === "session_not_found" ||
+    error.code === "bad_jwt" ||
+    error.code === "session_expired"
+  );
+}
+
 function updatePasswordErrorMessage(error: AuthError): string {
-  // Checked before the switch, because this one does not have a code. With no
-  // session `updateUser` returns `AuthSessionMissingError`, whose `code` is
-  // `undefined` and whose `status` is 400 — so it would fall to `default` and
-  // be reported as a generic failure, when the actual cause (the recovery
-  // session is gone) has a specific and actionable answer.
-  if (isAuthSessionMissingError(error)) {
-    return "That reset link has expired. Request a new one.";
+  if (isRecoverySessionGone(error)) {
+    return EXPIRED_LINK_MESSAGE;
   }
 
   switch (error.code) {
-    case "session_not_found":
-    case "bad_jwt":
-    case "session_expired":
-      return "That reset link has expired. Request a new one.";
     case "same_password":
       return "That is already your password. Choose a different one.";
     case "weak_password":
@@ -260,6 +297,11 @@ export async function signOut(): Promise<ActionResult<null>> {
     return { ok: false, error: NOT_CONFIGURED };
   }
 
+  // A recovery marker belongs to the session that was just ended, and must not
+  // outlive it: the next person to sign in on this browser would otherwise
+  // arrive while it is still valid (§8.5).
+  await clearRecoveryMarker();
+
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -320,7 +362,13 @@ export async function requestPasswordReset(
     return { ok: false, error: NOT_CONFIGURED };
   }
 
-  revalidatePath("/", "layout");
+  // No `revalidatePath("/", "layout")`, unlike every action above it — and not
+  // an oversight to be tidied up for symmetry. `signUp`/`signIn`/`signOut`
+  // revalidate because they change the session every Server Component renders
+  // from; this one creates no session and changes nothing any page displays, so
+  // the call would buy nothing. What it would cost is real: this endpoint is
+  // reachable by an anonymous visitor, so a purge of the entire route cache
+  // would be one unauthenticated submit away, repeatable in a loop.
   return { ok: true, data: null };
 }
 
@@ -328,7 +376,9 @@ export async function requestPasswordReset(
  * §8.5. Sets the new password on the session `/auth/reset` created. There is no
  * old-password field because there is no old password to check against: the
  * emailed token was the proof, and GoTrue holds the only session that lets this
- * call succeed at all.
+ * call succeed at all. That is also why this refuses any caller the recovery
+ * marker does not name — without it the absent old-password field would be a
+ * missing check rather than an unnecessary one.
  *
  * Returns rather than redirects, for the reason `signOut` gives — `redirect()`
  * throws, and the try/catch here would swallow it. The caller navigates.
@@ -346,21 +396,64 @@ export async function updatePassword(
 
   const { password } = parsed.data;
 
+  // **This is the enforcement; the page's identical check is the convenience.**
+  // A server action is a network-reachable endpoint, so gating only
+  // `/reset-password` would hide the form without closing it — and §4.2.2
+  // already settles that shape for admin routes ("neither check is sufficient
+  // alone"), as §8.1.1 does for onboarding ("the function, not the page, is the
+  // enforcement"). Without this, any signed-in user who crafts the POST changes
+  // their own password with no old password asked for, which is precisely the
+  // change-password surface §8.5 says the product does not offer.
+  //
+  // It costs a `getUser()` round trip on every submit, and that is the right
+  // trade: it happens once per completed recovery, against a call that is about
+  // to hit GoTrue anyway.
+  //
+  // Same wording as an expired link, because from the user's side it is the
+  // same event with the same remedy — the marker no longer speaks for this
+  // session, and a new link is what fixes it either way. The stale marker goes
+  // with it, so the retry lands on `/forgot-password` rather than on a form
+  // that can only refuse again.
+  //
+  // A live recovery — marker and session agreeing — passes straight through to
+  // `updateUser`, which stays the authority: a session that dies between this
+  // check and that call still surfaces as `AuthSessionMissingError` below.
+  if (!(await isRecoveryUnlocked())) {
+    await clearRecoveryMarker();
+    return { ok: false, error: EXPIRED_LINK_MESSAGE };
+  }
+
+  let refusal: string | null = null;
+  let recoverySessionGone = false;
   try {
     const supabase = await createClient();
     const { error } = await supabase.auth.updateUser({ password });
 
     if (error) {
-      return { ok: false, error: updatePasswordErrorMessage(error) };
+      refusal = updatePasswordErrorMessage(error);
+      recoverySessionGone = isRecoverySessionGone(error);
     }
-
-    // The marker has done its job. Cleared so a back button lands on
-    // `/forgot-password` rather than a second form that would only report
-    // `same_password`.
-    await clearRecoveryCookie();
   } catch {
     return { ok: false, error: NOT_CONFIGURED };
   }
+
+  if (refusal) {
+    if (recoverySessionGone) {
+      // The marker outlived the session it was set for, which is the one state
+      // where leaving it in place makes a dead end: the page renders a form,
+      // the form is refused, and nothing clears the cookie — so the next
+      // attempt is refused identically. Clearing it here means the retry lands
+      // on `/forgot-password` and a new link, one click away (§4.2.2).
+      await clearRecoveryMarker();
+    }
+    return { ok: false, error: refusal };
+  }
+
+  // The marker has done its job. Cleared so a back button lands on
+  // `/forgot-password` rather than a second form that would only report
+  // `same_password` — and outside the try above, because a failure to delete a
+  // cookie must not report an already-changed password as a failed change.
+  await clearRecoveryMarker();
 
   revalidatePath("/", "layout");
   return { ok: true, data: null };
