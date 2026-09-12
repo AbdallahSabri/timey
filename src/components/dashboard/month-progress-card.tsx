@@ -1,3 +1,8 @@
+import { ProgressMeter } from "@/components/charts/progress-meter";
+import { differenceSeconds } from "@/components/reports/report-expected";
+// The one definition of the headline-figure face, shared with the report
+// header and the tiles on both dashboards.
+import { FIGURE_CLASS } from "@/components/structure/stat-tile";
 import {
   Card,
   CardContent,
@@ -11,8 +16,11 @@ import { cn } from "@/lib/utils";
 /**
  * Worked against expected, month to date (`SPEC.md` §9.8).
  *
- * Presentational only: it takes integer seconds and renders them. The fetching
- * is the page's job, and the worked figure it is handed comes from
+ * Presentational only: it takes integer seconds and renders them. The bar is
+ * `ProgressMeter`, which is where the two guards that used to live here — the
+ * 100% clamp and the zero-target case — now are; `/overview`'s attendance card
+ * has one per person and must not re-derive them. The fetching is the page's
+ * job, and the worked figure it is handed comes from
  * `report_summary` — the same aggregate `/reports` reads — because a dashboard
  * number that could disagree with the report behind it would be worse than no
  * number at all.
@@ -31,10 +39,6 @@ import { cn } from "@/lib/utils";
  *     figure that has not moved since this morning. Unexplained, that looks
  *     like lost work.
  */
-
-/** Matches the report header's figures and the running clock they echo. */
-const FIGURE_CLASS =
-  "font-mono text-3xl leading-none font-medium tracking-tight tabular-nums";
 
 const TARGET_CLASS = "font-mono text-base tabular-nums text-muted-foreground";
 
@@ -56,17 +60,8 @@ export function MonthProgressCard({
   monthLabel: string;
 }) {
   const hasTarget = expectedSeconds !== null;
-  const differenceSeconds = hasTarget ? workedSeconds - expectedSeconds : 0;
-  const isBehind = differenceSeconds < 0;
-
-  // Clamped so a big overshoot cannot paint outside the track, and guarded so a
-  // zero-hour target is not a division by zero. A met target with no hours in
-  // it is full rather than empty: nothing was asked for and nothing is missing.
-  const progress = !hasTarget
-    ? 0
-    : expectedSeconds === 0
-      ? 100
-      : Math.min(100, Math.max(0, (workedSeconds / expectedSeconds) * 100));
+  const difference = differenceSeconds(workedSeconds, expectedSeconds) ?? 0;
+  const isBehind = difference < 0;
 
   return (
     <Card>
@@ -89,19 +84,11 @@ export function MonthProgressCard({
 
         {hasTarget ? (
           <>
-            <div
-              className="bg-muted h-2 w-full overflow-hidden rounded-full"
-              role="progressbar"
-              aria-valuenow={Math.round(progress)}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Hours worked against hours expected this month"
-            >
-              <div
-                className="bg-primary h-full rounded-full transition-[width]"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
+            <ProgressMeter
+              valueSeconds={workedSeconds}
+              targetSeconds={expectedSeconds}
+              ariaLabel="Hours worked against hours expected this month"
+            />
 
             <p className="text-sm">
               <span
@@ -110,10 +97,10 @@ export function MonthProgressCard({
                   isBehind ? "text-foreground" : "text-primary",
                 )}
               >
-                {formatSecondsHms(Math.abs(differenceSeconds))}
+                {formatSecondsHms(Math.abs(difference))}
               </span>{" "}
               <span className="text-muted-foreground">
-                {differenceSeconds === 0
+                {difference === 0
                   ? "difference — exactly on target"
                   : isBehind
                     ? "behind the expected hours so far"

@@ -5,6 +5,7 @@ import {
   UsersIcon,
   FileClockIcon,
   ChartNoAxesColumnIcon,
+  LayoutDashboardIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,9 +44,16 @@ import type { MemberRole } from "@/lib/validations/members";
  *
  * `primary` splits the phone's four tab slots from the overflow menu behind
  * "More". That is a question of how often a thumb reaches for something, and
- * nothing else. Note that an employee's overflow comes out empty — both
+ * nothing else. Note that an employee's overflow comes out empty — all three
  * non-primary links are admin-only — but "More" still renders for them,
  * because it also holds the phone's only sign-out.
+ *
+ * **`/overview` (§9.9) is the one flagged route whose data is genuinely
+ * admin-only**, rather than merely unhelpful to an employee: it reads
+ * `time_entries` company-wide, which `time_entries_select_own_or_admin` grants
+ * to an active admin alone. Withholding the link is still presentation — RLS
+ * and `middleware.ts` are the boundary, as ever — but here they have something
+ * to boundary.
  */
 export type NavLinkSpec = {
   href: string;
@@ -65,6 +73,19 @@ export const NAV_LINKS: NavLinkSpec[] = [
     shortLabel: "Timer",
     icon: ClockIcon,
     primary: true,
+  },
+  {
+    href: "/overview",
+    label: "Overview",
+    icon: LayoutDashboardIcon,
+    /**
+     * Non-primary and it has to be: the tab bar has four slots, an admin
+     * already fills all four, and a fifth would make every tab too narrow to
+     * hit with a thumb. So the team dashboard lives in the phone's "More"
+     * menu, which is the right trade for a surface you read at a desk.
+     */
+    primary: false,
+    adminOnly: true,
   },
   {
     href: "/projects",

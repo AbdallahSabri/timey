@@ -324,7 +324,7 @@ Recorded because §11 requires conflicts to amend the spec rather than be coded 
 
 ### 4.2.2 Admin-only routes — RULED
 
-`/members`, `/clients`, `/projects` and `/projects/[id]` render for an admin only. An employee reaching one is redirected to `/dashboard`, by `src/lib/supabase/middleware.ts` and again by the page itself — middleware does not run on every rendering path, so neither check is sufficient alone.
+`/members`, `/clients`, `/projects`, `/projects/[id]` and `/overview` render for an admin only. An employee reaching one is redirected to `/dashboard`, by `src/lib/supabase/middleware.ts` and again by the page itself — middleware does not run on every rendering path, so neither check is sufficient alone.
 
 **No policy in §4.2 changes, and that is the ruling, not an omission.** Every table behind these routes stays company-readable because other screens an employee is entitled to read through them:
 
@@ -337,6 +337,8 @@ Recorded because §11 requires conflicts to amend the spec rather than be coded 
 This reverses the position previously argued in `src/components/layout/nav.ts` — that withholding a link protects nothing, therefore every link is shown to every role. That was right about the protection and wrong about the conclusion: a link to a page whose every control refuses you is a dead end, not a neutral one.
 
 `/corrections` is deliberately **not** on the list. §7.4 gives an employee their own requests and their outcomes, and `corrections/page.tsx` already renders the admin review queue for an admin only — so the page needed no change.
+
+**`/overview` (§9.9) is the one entry on this list whose contents really are confidential**, and it is worth saying because it changes what the paragraphs above claim. The original three hide a surface without hiding data — every table behind them stays company-readable, deliberately. The team dashboard reads `time_entries`, and `time_entries_select_own_or_admin` scopes an employee to `user_id = auth.uid()`. So an employee who reached that URL would be shown their own hours and their own timer under a heading about the team: wrong, but not a disclosure. For that route the redirect is a convenience sitting on top of a boundary that already holds, rather than the whole of it. This strengthens the ruling rather than qualifying it — and it means the §12.2 tenancy check for `/overview` is testing the redirect, while the *policy* is what the "Employee B cannot see Employee A's time entries" check already covers.
 
 ### 8.1.1 An invited account may not create a company — RULED
 
@@ -422,7 +424,8 @@ A timer running longer than `companies.max_timer_hours` (default 12) is **stale*
 **[R] Stale timers are never auto-closed.** Silently writing an `ended_at` the system invented is fabricating a work record. Instead:
 
 - The employee sees a blocking prompt on next load: *"Your timer has been running 19 hours. When did you actually stop?"* — offering (a) stop now, or (b) submit a correction with the real end time.
-- The admin dashboard lists stale timers as an exception queue.
+- The admin dashboard lists stale timers as an exception queue. That dashboard is `/overview` (§9.9), where the stale timers are the same rows as the on-the-clock list, marked — `isStale(elapsed, max_timer_hours)` is a comparison against a clock that ticks in the browser, so a timer crosses the threshold while the page is open and the two readings must be computed in one place.
+- **The queue is informational, and offers no stop button** (`BLOCKERS.md` D-5). An admin may close a running entry only when its owner is *inactive*; an active employee's timer is untouchable by anybody at the database. So the card says what can be done — ask the person, or approve the correction the prompt above offers them — rather than rendering a control Postgres is certain to refuse.
 - The entry contributes zero to reports while `ended_at IS NULL`. Running time is never counted.
 
 ### 5.4.1 Amendments from implementation (`BLOCKERS.md` N-9, closed 2026-08-25)
@@ -710,6 +713,82 @@ nothing produces no `report_by_user` row at all — and is precisely the row an 
 report exists to surface. Expected-only people are therefore appended with a zero worked
 total, which is why the expected functions return `user_name` rather than ids alone.
 
+**9.9 [R] Dashboards.** §9.1–§9.8 define reports you *run*: pick a range, pick a grouping,
+read the answer. A dashboard is the same data with the question already asked. There are
+two, and they are two because the audiences have no overlap at all — an employee may see
+only their own time (§4.2, `BLOCKERS.md` D-2), so a shared surface would be two different
+pages wearing one name.
+
+- **`/dashboard` is personal, and renders for both roles.** The timer stays the first thing
+  on it: it is what the product is for, and an admin logs time like anybody else. Alongside
+  it: today, this week and this month; §9.8's worked-vs-expected card; the last 14 days as
+  a bar per day; this month by project; and the count of the caller's own correction
+  requests still awaiting review.
+- **`/overview` is the team, and is admin-only** (§4.2.2). The month's hours, what was
+  logged today, who is on the clock, and how many corrections are waiting; §5.4's
+  stale-timer exception queue; §9.8's attendance for everyone, furthest behind first; the
+  last 14 days company-wide; and the month by project.
+
+**9.9.1 Every figure is a §9.3 or §9.8 aggregate.** No dashboard adds an RPC and no dashboard
+writes a query: the eleven actions in `lib/actions/reports.ts` produce every *number* on
+both surfaces, and going through them is what keeps §9.2's scoping in one place.
+
+Two reads on these pages are not report actions, and neither produces a figure:
+`listRunningTimers()` (§5.4's queue — rows, not totals, and there is no aggregate that could
+return them) and `listMemberProjectSchedules()` (which decides only which bars are dimmed,
+per §9.9.2). Anything that *is* a duration or a count comes from a report action.
+
+Two consequences worth stating, because both look like invitations to shortcuts:
+
+- **A dashboard may sum buckets, never entries.** §9.1 forbids aggregating raw entries in
+  Node, and adding a few `report_by_day` rows together is not that: they are sums Postgres
+  computed, and the arithmetic is the same one §12.2 asks a table footer to do. The test is
+  whether the line items are on screen — "today" and "this week" are read off bars the same
+  card renders. Summing `report_entries` rows would be the forbidden thing, and D-16 already
+  says any caller that does it owns the NULL-duration problem itself.
+- **The month figure comes from `report_summary` and from nothing else** (§9.8.1). The day
+  series could be summed over the month instead and must not be: two paths to one number is
+  how a dashboard comes to disagree with the report behind it.
+
+**9.9.2 A dashboard may not invent a target the database does not compute.** The bar charts
+show worked hours with no expected line. Expected is a *range* quantity — §9.8's functions
+accrue it from each assignment's `added_at` across the working days in a range — and there
+is no per-day function. A daily target rebuilt at the edge from `project_members` columns
+would ignore accrual and stand next to §9.8's figure disagreeing with it;
+`weeklySecondsOf()` already carries a comment saying it is the flat weekly rate and not the
+report figure, for the same reason. Worked-against-expected appears only where §9.8 put it:
+the month card, the attendance rows, and `/reports`.
+
+A chart *may* dim a day outside somebody's working days, and that is not a target: it is a
+statement about the calendar. Where no schedule exists at all, nothing is dimmed — dimming
+every day would imply the person is never due in.
+
+The dimming is phrased in the **present tense** — "outside your working days", not "was not
+a working day" — because the schedule it reads is the one in force now and
+`project_members` carries no history of it. A person assigned last week has working days
+that say nothing about the fortnight before, and §9.8's accrual-from-`added_at` rule exists
+precisely because that gap is real. Present tense is the strongest claim the data supports.
+
+**9.9.3 A truncated list carries no total** (§12.2, `BLOCKERS.md` D-16). The attendance card
+shows the first several people and links to `/reports?grouping=user` for the rest, so it
+shows no sum; the project breakdown collapses its tail into one "Other" and likewise shows
+none. The range's totals are the tiles above, which come from `report_summary`.
+
+**9.9.4 §9.8.2's two disclosures apply wherever worked meets expected**, which on a
+dashboard is the month card and the attendance rows: today is counted in full, and a running
+timer counts for nothing until it is stopped. Both are load-bearing sentences, not
+decoration — the figures are correct in a way that reads wrong without them.
+
+**9.9.5 Charts are hand-rolled, and there is no charting dependency.** The `--chart-1` …
+`--chart-5` tokens in `globals.css` are what they are drawn with. Three reasons, in order of
+weight: a picture of a bar is worth nothing to a screen reader, so every chart renders as a
+list whose items are *named* with their date and their exact `H:MM:SS` and paints a `div`
+behind that name — the accessible reading is the chart, not a fallback to it; the components
+stay server-rendered; and the test environment is jsdom, which has no layout and would
+measure every column in a real charting library at zero. §12.3's "a build chunk with its own
+dependency" bar is the one a chart library would have to clear, and for bars and meters it
+does not.
+
 ---
 
 ## 10. Open Decisions
@@ -798,6 +877,18 @@ Run after any migration touching RLS or `time_entries`. Two browser profiles, tw
 - [ ] Approving a correction that would now overlap → fails cleanly, entry unchanged, request still pending
 - [ ] Admin cannot approve their own request
 
+**Dashboards (§9.9)**
+- [ ] An employee typing `/overview` is redirected to `/dashboard`, and the link is in neither their header row nor their phone "More" menu
+- [ ] The employee dashboard's "This month" figure equals `/reports`' total for the same range with the person filter set to themselves
+- [ ] Today's bar on the 14-day chart equals the "Today" tile above it, and the bars from the week's start equal the "This week" tile
+- [ ] Starting a timer moves no figure on either dashboard, raises the running count, and produces the "not counted yet" sentence
+- [ ] A person with a schedule and no entries at all appears in the attendance card, `0:00:00` worked against a non-zero expected (§9.8.3's union row)
+- [ ] Two people running timers both appear under "On the clock now" with counters that tick; stopping one removes it on the next load
+- [ ] A timer past `max_timer_hours` is marked stale and offers no stop button
+- [ ] With more people than the attendance card shows, it says so and carries no total
+- [ ] A project the caller can no longer read shows as "Unknown project", muted — never blank, never "null"
+- [ ] In a DST-at-midnight zone (`America/Havana`), the chart's last bar is the company's today and no month boundary shifts a day
+
 **Time & reporting**
 - [ ] A 22:00→03:00 entry appears entirely on the start day, in company timezone
 - [ ] A running timer contributes zero to report totals
@@ -821,5 +912,7 @@ Run after any migration touching RLS or `time_entries`. Two browser profiles, tw
 | calendar (range) | Report date filters (§9.2) |
 
 Note: the report and queue grids need a sortable, filterable data table. In shadcn that's a TanStack Table recipe, not a single primitive — treat it as a build chunk with its own dependency, not a `pnpm dlx` away.
+
+*Amended.* Every primitive in the "needed" table has since been installed, and the data table was built on `@tanstack/react-table` as described. **§9.9's charts add no primitive and no dependency**: the bar charts, the proportion bars and the worked-vs-expected meter are hand-written in `src/components/charts/` against the `--chart-*` tokens, for the three reasons §9.9.5 gives. This is the standing answer to the next person who reaches for a charting library — it is the "build chunk with its own dependency" bar above, and for bars and meters it is not cleared.
 
 Add via `pnpm dlx shadcn@latest add <name>`. Per `CLAUDE.md`, generated files in `src/components/ui/**` are not hand-edited.

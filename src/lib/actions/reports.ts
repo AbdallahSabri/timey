@@ -23,11 +23,18 @@ import {
 // "use server" module into this one's graph.
 import type { ActionResult } from "@/lib/actions/auth";
 // A value import. Every report needs the caller's role before it can build its
-// arguments (§9.2's employee filter drop, below), and `getCurrentMember()`
-// already answers "who am I, what may I do" in one read — a second copy of that
+// arguments (§9.2's employee filter drop, below), and this already answers
+// "who am I, what may I do" in one read — a second copy of that
 // `profiles -> companies` query here would be a second place for §4.2.1's limbo
 // case to be handled differently.
-import { getCurrentMember } from "@/lib/actions/companies";
+//
+// **`readCurrentMember` rather than `getCurrentMember`, and the difference is
+// per-request memoisation.** They return the same value; this one is wrapped in
+// React's `cache`. Eleven actions in this file call `prepare()`, and a page that
+// composes four reports (§9.9's dashboards) would otherwise validate the JWT
+// against the auth server four times over to answer one question. Going through
+// the `"use server"` wrapper would work and would not memoise.
+import { readCurrentMember } from "@/lib/auth/current-member";
 import {
   csvForReport,
   csvForReportEntries,
@@ -471,7 +478,7 @@ async function prepare(
     };
   }
 
-  const member = await getCurrentMember();
+  const member = await readCurrentMember();
   if (!member.ok) {
     return member;
   }
@@ -630,7 +637,7 @@ export async function getReportByDay(
  * Split from the exported action below because `getReportByUser` and
  * `getReportSummary` both need these rows *alongside* a call they are already
  * making, and going through the action would run `prepare` — and therefore
- * `getCurrentMember`'s round trip — a second time per report. The arguments are
+ * `readCurrentMember`'s round trip — a second time per report. The arguments are
  * already scoped by then; re-deriving who the caller is would be the second
  * definition of an admin that §0.2 warns about.
  *

@@ -33,7 +33,7 @@ const TAB_CLASS =
  *
  * **The two lists are computed per render, not at module scope**, because they
  * depend on `role`. An employee's works out to three tabs and an empty
- * overflow — both non-primary destinations are admin-only.
+ * overflow — all three non-primary destinations are admin-only.
  *
  * **"More" renders even when that overflow is empty**, which looks like a bug
  * and is not: the header's sign-out is `md`-only, so this menu is the phone's

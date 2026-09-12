@@ -4,12 +4,14 @@ import {
   addDays,
   companyToday,
   dateToDayString,
+  dayOfWeek,
   dayStringToDate,
   endOfMonth,
   formatDayLabel,
   formatDayRange,
   isDayString,
   startOfMonth,
+  startOfWeek,
 } from "@/components/reports/report-days";
 
 describe("isDayString", () => {
@@ -150,5 +152,62 @@ describe("companyToday", () => {
 
   it("falls back to UTC for a company with no zone on record", () => {
     expect(companyToday(null, Date.UTC(2026, 7, 25, 2, 0))).toBe("2026-08-25");
+  });
+});
+
+describe("dayOfWeek", () => {
+  it("numbers days the way extract(dow) does, 0 = Sunday", () => {
+    // 2026-09-13 is a Sunday. The numbering has to match `working_days`, which
+    // is compared in SQL with a bare `= any(...)`.
+    expect(dayOfWeek("2026-09-13")).toBe(0);
+    expect(dayOfWeek("2026-09-14")).toBe(1);
+    expect(dayOfWeek("2026-09-19")).toBe(6);
+  });
+
+  it("reads the label in UTC, not in the reader's zone", () => {
+    // The label is a company-local day Postgres already bucketed. Using
+    // `getDay()` would give Saturday to anyone west of Greenwich for this one.
+    expect(dayOfWeek("2026-09-13")).toBe(0);
+  });
+
+  it("is null for a string that names no day", () => {
+    expect(dayOfWeek("2026-02-30")).toBe(null);
+    expect(dayOfWeek("not-a-day")).toBe(null);
+  });
+});
+
+describe("startOfWeek", () => {
+  it("walks back to Monday in a Monday-start company", () => {
+    // 2026-09-16 is a Wednesday.
+    expect(startOfWeek("2026-09-16", 1)).toBe("2026-09-14");
+    expect(startOfWeek("2026-09-14", 1)).toBe("2026-09-14");
+  });
+
+  it("treats Sunday as the end of a Monday-start week, not the start", () => {
+    // The `+ 7` before the modulo exists for exactly this day: Sunday is six
+    // days into a Monday-start week, and a naive `dow - start` would send it
+    // forward a day instead of back six.
+    expect(startOfWeek("2026-09-13", 1)).toBe("2026-09-07");
+  });
+
+  it("walks back to Sunday in a Sunday-start company", () => {
+    expect(startOfWeek("2026-09-16", 0)).toBe("2026-09-13");
+    expect(startOfWeek("2026-09-13", 0)).toBe("2026-09-13");
+  });
+
+  it("crosses a month and a year boundary", () => {
+    // 2026-10-01 is a Thursday; 2027-01-01 is a Friday.
+    expect(startOfWeek("2026-10-01", 1)).toBe("2026-09-28");
+    expect(startOfWeek("2027-01-01", 1)).toBe("2026-12-28");
+  });
+
+  it("falls back to Monday for a week_starts_on nobody could have meant", () => {
+    // `weekdaysFrom` guards the same way. A bad setting must not produce a
+    // second reading of the week somewhere else in the app.
+    expect(startOfWeek("2026-09-16", 9)).toBe(startOfWeek("2026-09-16", 1));
+  });
+
+  it("returns a non-day unchanged", () => {
+    expect(startOfWeek("2026-02-30", 1)).toBe("2026-02-30");
   });
 });

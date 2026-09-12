@@ -499,6 +499,75 @@ declare what each employee is expected to work and showing the two numbers toget
 
 ---
 
+## Phase 10 — Dashboards
+
+**Implements:** `SPEC.md` §9.9, §9.9.1–§9.9.5, and §5.4's unbuilt "admin dashboard lists stale timers as an exception queue"
+**Agents:** `implement-logic` → `build-ui`
+**Depends on:** Phases 8 and 9 (every figure on both surfaces is one of their aggregates)
+
+Phase 8 answers *how much* and Phase 9 answers *is that enough* — but both only when you go
+to `/reports` and operate two controls first. This phase turns those answers into two
+landing surfaces, and builds the one §5.4 ruling that was never built.
+
+**No migration and no new RPC.** This is the first phase since Phase 2 that writes no SQL:
+the eleven actions in `lib/actions/reports.ts` already answer everything on both pages, and
+going through them is what keeps §9.2's scoping in one place. The order is therefore
+actions → helpers → UI, not migrations → types → actions → UI.
+
+### Work items
+
+**Actions**
+- `listRunningTimers()` — the one question no action can answer, because `getRunningTimer()`
+  filters `user_id` and must keep doing so. Not role-checked and not company-filtered,
+  following `listPendingCorrectionRequests`' reasoning for the identical case: RLS is the
+  boundary, and a third opinion in TypeScript is free to disagree with it.
+- One request-scoped memo of the current member. `prepare()` calls `getCurrentMember()` per
+  report, and each call is a `getUser()` round trip to the auth server — a four-report page
+  would validate the same JWT six times. React's `cache` in a non-`"use server"` module
+  fixes it without a second definition of "who is an admin" (§0.2).
+
+**Pure helpers — all tested, and the two that look like aggregation are not**
+- `startOfWeek(day, weekStartsOn)` and `dayOfWeek(day)`: label arithmetic in UTC, beside
+  `startOfMonth`. `companies.week_starts_on` gets its second reader.
+- `fillDaySeries`: `report_by_day` returns only the days that happened, and a chart missing
+  its empty days draws a dishonest axis. It adds zeroes and sums nothing.
+- `topNWithOther`: collapses an already-aggregated tail. It does not re-sort — SQL
+  established the order.
+- `byShortfall`: the one place this codebase deliberately re-orders a SQL result, because a
+  person who logged nothing sorts *last* in `total_seconds desc` and first in an attendance
+  list. Both files say so.
+
+**UI**
+- Four presentational primitives in `src/components/charts/` plus `StatTile` in
+  `structure/`. Two of them remove existing duplication rather than adding a layer:
+  `ProgressMeter` is `MonthProgressCard`'s bar, and `StatTile` is the `FIGURE_CLASS` that
+  had been copied verbatim into two files.
+- **Every chart's accessible name carries its exact figures** (§9.9.5). This is not a
+  courtesy: jsdom has no layout, so a rendered height is unassertable, and a chart whose
+  only reading is visual cannot be tested at all. The list-and-aria-label shape is what
+  makes these the best-covered components in the app.
+- `/overview`, admin-only, guarded in middleware **and** in the page.
+- `/dashboard` gains the tiles, the chart and the breakdown. The timer does not move.
+- `nav.ts` gains `/overview` as `primary: false` — the tab bar has four slots and an admin
+  already fills them.
+
+### Exit criteria
+- Gate green.
+- The employee dashboard's month figure and `/reports`' total for the same range agree, and
+  the tiles agree with the bars they are read off.
+- A person with a schedule and no entries appears in the attendance card.
+
+### Manual verification (§12.2)
+- [ ] An employee typing `/overview` lands on `/dashboard`, and sees no link to it anywhere
+- [ ] "Today" and "This week" equal the bars beneath them; "This month" equals `/reports`
+- [ ] A running timer moves no figure, raises the running count, and is disclosed
+- [ ] Somebody with a schedule and zero entries appears in the attendance card
+- [ ] A stale timer is marked and offers no stop button (D-5)
+- [ ] A truncated attendance card shows no total
+- [ ] `America/Havana`: the last bar is the company's today
+
+---
+
 ---
 
 ## Sequencing rationale

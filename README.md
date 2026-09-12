@@ -2,10 +2,10 @@
 
 Time tracking for small teams. People start and stop a timer — or enter hours manually — against a **client → project → task** hierarchy, and those entries roll up into reports. Fixing a closed entry goes through an admin-approved correction, because the design intent behind the whole product is one sentence: **an employee cannot quietly rewrite their own history.**
 
-**In scope:** time capture, project/task structure, team membership, missed-punch corrections, reporting, CSV export.
+**In scope:** time capture, project/task structure, team membership, missed-punch corrections, reporting, CSV export, and a dashboard each for an employee and for the admin of a team.
 **Out of scope by design (not "later"):** billing, rates, invoicing, payroll export, screenshots, activity monitoring, GPS, idle detection.
 
-All nine build phases are complete — the app is functional end to end against a real Supabase project.
+All ten build phases are complete — the app is functional end to end against a real Supabase project.
 
 ## The documents
 
@@ -22,7 +22,7 @@ This repo is spec-driven; the prose is load-bearing, not decoration.
 
 Next.js 15 (App Router, TS strict, `src/`) · Tailwind CSS v4 (CSS-first — tokens in `src/app/globals.css`, no `tailwind.config.ts`) · shadcn/ui (Radix, "Nova" preset) · `next-themes` · Supabase via `@supabase/ssr` · zod + react-hook-form · TanStack Table · date-fns · Resend · pnpm · ESLint + Prettier · Husky + lint-staged · Vitest + React Testing Library · Docker (Coolify-ready).
 
-**Theme:** ledger green + live amber, light/dark/system. Green is the settled record and every action that writes one; `--live` (amber) marks a running timer and nothing else. Durations and clock times are always `font-mono tabular-nums`. Lists render as cards below `md` and as tables at `md` and up; navigation is a header row on desktop and a tab bar on a phone.
+**Theme:** ledger green + live amber, light/dark/system. Green is the settled record and every action that writes one; `--live` (amber) marks a running timer and nothing else. Durations and clock times are always `font-mono tabular-nums`. Lists render as cards below `md` and as tables at `md` and up; navigation is a header row on desktop and a tab bar on a phone. Charts are hand-written against the `--chart-*` tokens — there is no charting dependency, and every chart's figures are in its accessible name rather than only in its shape (`SPEC.md` §9.9.5).
 
 ## Quick start
 
@@ -198,7 +198,8 @@ RLS-adjacent surface, and the automated suite verifies none of it.
 | `/reset-password` | Any state | Sets a new password. Renders only for a visitor holding the marker cookie `/auth/reset` sets |
 | `/onboarding` | Signed in, no company | Create a company and become its admin. The only valid `company_id IS NULL` state |
 | `/invite/[token]` | Any state | Accept an invitation; refuses plainly if you already belong to a company |
-| `/dashboard` | Members | The running timer, today's entries, manual entry, the stale-timer prompt |
+| `/dashboard` | Members | The running timer, today's entries, manual entry, the stale-timer prompt; your own figures for today, the week and the month, the last 14 days, and where the month went |
+| `/overview` | **Admins** | The team: hours this month, who is on the clock, stale timers, worked vs expected per person, the last 14 days, the month by project |
 | `/projects`, `/projects/[id]` | Members | Projects (assigned ones for an employee), tasks, project membership |
 | `/clients` | Members | Clients, archive/unarchive |
 | `/members` | Members | The team list; role changes and deactivation are admin-gated at the database |
@@ -214,7 +215,7 @@ Middleware (`src/lib/supabase/middleware.ts`) refreshes the session and enforces
 ```
 src/
   app/
-    (app)/            authenticated shell: dashboard, projects, clients, members, corrections, reports
+    (app)/            authenticated shell: dashboard, overview, projects, clients, members, corrections, reports
     auth/confirm/     email-confirmation callback
     invite/[token]/   invitation acceptance
     onboarding/       company creation
@@ -223,12 +224,15 @@ src/
   components/
     ui/               shadcn primitives — presentational only, CLI-managed
     layout/           header, desktop nav, mobile tab bar; destinations declared once in nav.ts
-    structure/        DataCard (the below-md list form), archive dialog/toggle
+    structure/        DataCard (the below-md list form), StatTile, archive dialog/toggle
+    charts/           hand-rolled day bars, proportion bars, progress meter — no chart library
+    dashboard/        month progress, team attendance, team running timers
     time-entries/     timer, elapsed counter, manual entry, stale-timer prompt
     corrections/      submit, review queue, approve/reject/amend dialogs
     clients/ projects/ tasks/ project-members/ members/ invitations/ reports/ auth/ theme/
   lib/
     supabase/         browser/server clients + middleware session refresh
+    auth/             the recovery cookie, and the per-request read of the current member
     actions/          server actions — {ok: true, data} | {ok: false, error}
     validations/      zod schemas
     time/             company-timezone wall-clock resolution (DST-sensitive, shared)

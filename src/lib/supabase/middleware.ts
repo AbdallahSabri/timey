@@ -90,8 +90,20 @@ const INVITE_PATH_PREFIX = "/invite/";
  * `/corrections` is deliberately absent: §7.4 gives an employee their own
  * requests and outcomes, and `corrections/page.tsx` already renders the admin
  * review queue only for an admin.
+ *
+ * **`/overview` is the exception to the paragraph above** (§9.9). The other
+ * three hide a surface whose data stays readable; the team dashboard reads
+ * `time_entries`, whose SELECT policy scopes an employee to their own rows. So
+ * for that one this redirect is a convenience sitting on top of a boundary that
+ * already holds, rather than the whole of it — an employee who got past it
+ * would see a page about themselves, not about the team.
  */
-const ADMIN_ONLY_PATHS = new Set(["/members", "/clients", "/projects"]);
+const ADMIN_ONLY_PATHS = new Set([
+  "/members",
+  "/clients",
+  "/projects",
+  "/overview",
+]);
 
 /**
  * `/projects/[id]` has to be caught too, and `ADMIN_ONLY_PATHS.has()` cannot
