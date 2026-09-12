@@ -57,7 +57,7 @@ jobs:
     steps:
       - name: Trigger deploy
         run: |
-          curl --fail --request GET '${{ secrets.COOLIFY_WEBHOOK }}' \
+          curl --fail --request POST '${{ secrets.COOLIFY_WEBHOOK }}' \
             --header 'Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}'
 
       - name: Wait for rollout
