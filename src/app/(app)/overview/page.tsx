@@ -5,7 +5,11 @@ import { DayBarChart, type DayBar } from "@/components/charts/day-bar-chart";
 import { fillDaySeries, maxSecondsOf } from "@/components/charts/day-series";
 import { ProportionBarList } from "@/components/charts/proportion-bar-list";
 import { topNWithOther } from "@/components/charts/top-n";
-import { TeamAttendanceList } from "@/components/dashboard/team-attendance-list";
+import { teamTotals } from "@/components/dashboard/attendance-rows";
+import { EmployeeProgressGrid } from "@/components/dashboard/employee-progress-grid";
+import { SetupChecklist } from "@/components/dashboard/setup-checklist";
+import { unassignedMemberCount } from "@/components/dashboard/setup-state";
+import { TeamProgressCard } from "@/components/dashboard/team-progress-card";
 import { TeamRunningTimers } from "@/components/dashboard/team-running-timers";
 import {
   addDays,
@@ -36,8 +40,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getCurrentMember } from "@/lib/actions/companies";
+import { listClients } from "@/lib/actions/clients";
+import { getCurrentMember, listMembers } from "@/lib/actions/companies";
 import { listPendingCorrectionRequests } from "@/lib/actions/corrections";
+import { listInvitations } from "@/lib/actions/invitations";
+import { listProjectMemberships } from "@/lib/actions/project-members";
+import { listProjects } from "@/lib/actions/projects";
 import {
   getReportByDay,
   getReportByProject,
@@ -55,9 +63,6 @@ export const metadata: Metadata = {
 
 /** Long enough to see a rhythm, short enough to read at phone width. */
 const CHART_DAYS = 14;
-
-/** How many people fit the attendance card before it defers to `/reports`. */
-const ATTENDANCE_LIMIT = 8;
 
 /** Projects shown before the tail collapses into one "Other". */
 const BREAKDOWN_LIMIT = 6;
@@ -91,13 +96,19 @@ const RUNNING_LIMIT = 8;
  * not the team's. The redirect spares them a page about themselves with the
  * wrong title; RLS is what keeps it from being a page about everybody else.
  *
- * **Every figure comes from a §9.3 aggregate and nothing is aggregated here**
- * (§9.1, §9.9.1). Four report actions plus two list reads, all through
- * `lib/actions/**`, all sharing the §9.2 scoping that `prepare()` applies once.
- * The page adds nothing up: "Logged today" *picks* one bucket out of the day
- * series — the same bucket the chart below draws as today's bar — and the only
- * addition anywhere is `topNWithOther` folding a breakdown's tail, which is
- * arithmetic over sums Postgres computed rather than over entries.
+ * **Every figure comes from a §9.3 aggregate** (§9.1, §9.9.1): four report
+ * actions, all through `lib/actions/**`, all sharing the §9.2 scoping that
+ * `prepare()` applies once. Seven further reads return *rows* rather than
+ * measurements — the running timers, the correction queue, and the five the
+ * setup card counts — which is the carve-out §9.9.1 makes and the reason a
+ * project count may be read straight off `listProjects()`.
+ *
+ * **What the page does add up, it adds up over line items that are on screen**,
+ * which is §9.9.1's own test and §12.2's. `teamTotals` sums the employee cards
+ * rendered beneath it; `topNWithOther` folds a breakdown's tail. Both are
+ * arithmetic over sums Postgres computed, never over entries. "Logged today"
+ * adds nothing at all — it *picks* one bucket out of the day series, the same
+ * bucket the chart draws as today's bar.
  */
 export default async function OverviewPage() {
   const memberResult = await getCurrentMember();
@@ -137,6 +148,11 @@ export default async function OverviewPage() {
     projectsResult,
     runningResult,
     queueResult,
+    clientsResult,
+    projectListResult,
+    membersResult,
+    invitationsResult,
+    membershipsResult,
   ] = await Promise.all([
     getReportSummary(monthRange),
     // Already union-merged with expected hours (§9.8.3) — the people who logged
@@ -146,6 +162,19 @@ export default async function OverviewPage() {
     getReportByProject(monthRange),
     listRunningTimers(),
     listPendingCorrectionRequests(),
+    // Five row reads, none of them a report (§9.9.1). They feed §9.9.7's setup
+    // card, which counts what *exists* rather than measuring anything, and the
+    // project dialog's client picker.
+    //
+    // `listProjects()` rather than the by-project report: that report groups
+    // `time_entries`, so a project nobody has logged against yet produces no
+    // row — and a project with no time on it is precisely the state the setup
+    // card is there to move somebody past.
+    listClients(),
+    listProjects(),
+    listMembers(),
+    listInvitations(),
+    listProjectMemberships(),
   ]);
 
   // §5.4's threshold is the company's own setting; the constant only backs up
@@ -221,6 +250,38 @@ export default async function OverviewPage() {
 
   const monthLabel = formatDayRange(monthStart, today);
   const attendanceRows = attendanceResult.ok ? attendanceResult.data : [];
+
+  // Counted from rows the cards below render, which is what §12.2 asks of a
+  // total — see `teamTotals` for why only the expected side is summed here and
+  // the worked side comes from `report_summary`.
+  const totals = teamTotals(attendanceRows);
+  const runningUserIds = new Set(running.map((timer) => timer.userId));
+
+  // Each of these is `null` when its read failed, so §9.9.7's card can show an
+  // absence rather than a confident zero — "None yet" for a company with forty
+  // clients would be worse than an empty space.
+  const clients = clientsResult.ok ? clientsResult.data : [];
+  const clientCount = clientsResult.ok ? clientsResult.data.length : null;
+  const projectCount = projectListResult.ok
+    ? projectListResult.data.length
+    : null;
+
+  // **Active members only, and the filter is the point.** `listMembers()`
+  // returns deactivated people too — §2.3 keeps them for their history — and
+  // counting them here would strand the card on "1 member isn't on any project
+  // yet" forever for any company that has ever deactivated somebody who was
+  // never assigned. There is no action that clears that, short of putting an
+  // ex-employee on a project.
+  const activeMembers = membersResult.ok
+    ? membersResult.data.filter((member) => member.status === "active")
+    : null;
+  const pendingInvitationCount = invitationsResult.ok
+    ? invitationsResult.data.filter((invitation) => !invitation.expired).length
+    : null;
+  const unassigned =
+    activeMembers && membershipsResult.ok
+      ? unassignedMemberCount(activeMembers, membershipsResult.data)
+      : null;
   const attendanceHref = reportHref(
     resolveReportQuery({}, { from: monthStart, to: today }),
     { grouping: "user" },
@@ -237,6 +298,19 @@ export default async function OverviewPage() {
           {timezone ? ` Days are counted in ${timezone}.` : ""}
         </p>
       </div>
+
+      {/* First, because for a company with nothing in it this is the only card
+          on the page with anything to do — and because the order it describes
+          is the schema's, not a preference (§9.9.7). It shrinks to the tip and
+          three buttons once every step has something in it. */}
+      <SetupChecklist
+        clientCount={clientCount}
+        projectCount={projectCount}
+        memberCount={activeMembers?.length ?? null}
+        pendingInvitationCount={pendingInvitationCount}
+        unassignedMemberCount={unassigned}
+        clients={clients}
+      />
 
       <Card>
         <CardContent>
@@ -325,43 +399,44 @@ export default async function OverviewPage() {
             Somebody with a schedule who has logged nothing appears here too.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent className="flex flex-col gap-5">
           {attendanceResult.ok ? (
             <>
-              <TeamAttendanceList
+              {/* The team figure and the people it is made of, in that order.
+                  **Both of its figures are summed from the cards beneath**, over
+                  the same people, so the share it states is a ratio of two
+                  commensurable numbers — see `teamTotals`. The company-wide
+                  worked total is the tile above, from `report_summary`, and when
+                  somebody has no schedule the two differ by their hours. */}
+              <TeamProgressCard
+                workedSeconds={totals.workedSeconds}
+                expectedSeconds={totals.expectedSeconds}
+                counts={{
+                  behind: totals.behind,
+                  ahead: totals.ahead,
+                  onTarget: totals.onTarget,
+                  noTarget: totals.noTarget,
+                }}
+                rangeLabel={monthLabel}
+                runningCount={running.length}
+              />
+
+              <EmployeeProgressGrid
                 rows={attendanceRows}
-                limit={ATTENDANCE_LIMIT}
+                runningUserIds={runningUserIds}
+                from={monthStart}
+                to={today}
+                label={`Everyone in the company, ${monthLabel}`}
                 emptyLabel="Nobody has logged time or been given expected hours this month."
               />
 
-              <div className="text-muted-foreground flex flex-col gap-1 text-xs">
-                {/* §9.8.2's two disclosures, and both are load-bearing: the
-                    figures are correct in a way that reads wrong without
-                    them. */}
-                <p>Expected hours count today in full, however early it is.</p>
-                {running.length > 0 ? (
-                  <p>
-                    {running.length === 1
-                      ? "One timer is running now and is not counted yet."
-                      : `${running.length} timers are running now and are not counted yet.`}
-                  </p>
-                ) : null}
-                {attendanceRows.length > ATTENDANCE_LIMIT ? (
-                  // No total on this card, because it is showing some of the
-                  // people (§12.2, D-16). `/reports` has the whole set and a
-                  // footer that sums its own visible rows.
-                  <p>
-                    Showing {ATTENDANCE_LIMIT} of {attendanceRows.length}{" "}
-                    people.
-                  </p>
-                ) : null}
-              </div>
-
-              <div>
-                <Button asChild variant="outline" size="sm">
-                  <Link href={attendanceHref}>See everyone in Reports</Link>
-                </Button>
-              </div>
+              {attendanceRows.length > 0 ? (
+                <div>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={attendanceHref}>Open this in Reports</Link>
+                  </Button>
+                </div>
+              ) : null}
             </>
           ) : (
             <p className="text-destructive text-sm">{attendanceResult.error}</p>

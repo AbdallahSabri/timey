@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   byShortfall,
+  teamTotals,
   type AttendanceRow,
 } from "@/components/dashboard/attendance-rows";
+import { percentOf } from "@/components/reports/report-expected";
 
 function row(
   userName: string | null,
@@ -99,5 +101,89 @@ describe("byShortfall", () => {
     byShortfall(input);
 
     expect(names(input)).toEqual(before);
+  });
+});
+
+describe("teamTotals", () => {
+  it("sums both sides across the rows that have a target", () => {
+    const totals = teamTotals([
+      row("Behind", 36_000, 72_000),
+      row("Ahead", 108_000, 72_000),
+    ]);
+
+    expect(totals.workedSeconds).toBe(144_000);
+    expect(totals.expectedSeconds).toBe(144_000);
+  });
+
+  it("keeps the worked side to the same people as the expected side", () => {
+    // The ratio the team card shows has to describe one population. If an
+    // unscheduled person's hours landed in the numerator, a contractor could
+    // push the team past 100% while every individual card sat below it.
+    const totals = teamTotals([
+      row("Scheduled", 72_000, 72_000),
+      row("No schedule", 360_000, 0),
+    ]);
+
+    expect(totals.workedSeconds).toBe(72_000);
+    expect(totals.expectedSeconds).toBe(72_000);
+  });
+
+  it("reports no target at all rather than a zero one", () => {
+    // Zero would be a target of no hours, which somebody chose. Null is "there
+    // is nothing to be a share of", and the card renders it as an absence.
+    const totals = teamTotals([row("No schedule", 64_800, 0)]);
+
+    expect(totals.expectedSeconds).toBe(null);
+    expect(totals.workedSeconds).toBe(0);
+  });
+
+  it("partitions every row into exactly one of the four counts", () => {
+    const rows = [
+      row("Behind", 36_000, 72_000),
+      row("Also behind", 0, 72_000),
+      row("Ahead", 108_000, 72_000),
+      row("On target", 72_000, 72_000),
+      row("No schedule", 64_800, 0),
+      row("No target at all", 10, null),
+    ];
+    const totals = teamTotals(rows);
+
+    expect(totals.behind).toBe(2);
+    expect(totals.ahead).toBe(1);
+    expect(totals.onTarget).toBe(1);
+    expect(totals.noTarget).toBe(2);
+    expect(
+      totals.behind + totals.ahead + totals.onTarget + totals.noTarget,
+    ).toBe(rows.length);
+  });
+
+  it("leaves a no-target row out of both sums entirely", () => {
+    const totals = teamTotals([
+      row("Scheduled", 36_000, 72_000),
+      row("No schedule", 500_000, 0),
+    ]);
+
+    expect(totals.expectedSeconds).toBe(72_000);
+    expect(totals.workedSeconds).toBe(36_000);
+  });
+
+  it("agrees with percentOf about who has no target", () => {
+    // The count and the dashes on the cards are driven by the same predicate,
+    // so they cannot drift apart.
+    const totals = teamTotals([row("No schedule", 64_800, 0)]);
+
+    expect(totals.noTarget).toBe(1);
+    expect(percentOf(64_800, 0)).toBe(null);
+  });
+
+  it("is all zeroes for an empty team", () => {
+    expect(teamTotals([])).toEqual({
+      workedSeconds: 0,
+      expectedSeconds: null,
+      behind: 0,
+      ahead: 0,
+      onTarget: 0,
+      noTarget: 0,
+    });
   });
 });

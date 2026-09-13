@@ -165,3 +165,61 @@ export function differenceSeconds(
 ): number | null {
   return expectedSeconds === null ? null : totalSeconds - expectedSeconds;
 }
+
+/**
+ * Worked as a percentage of expected — **the one place a percentage is
+ * produced in this product** (`SPEC.md` §9.9.6).
+ *
+ * It sits beside `differenceSeconds` because the two are the same statement in
+ * two registers, over the same pair of numbers, and a surface that showed a
+ * percentage disagreeing with the ahead/behind beneath it would be worse than
+ * showing neither. Three rules, and each exists to refuse a specific lie:
+ *
+ *   * **Null when there is nothing to be a percentage of** — a null target and
+ *     a *zero* one alike. Zero is the live case on `/overview`:
+ *     `mergeExpectedByUser` deliberately reads `?? 0`, so somebody with no
+ *     schedule arrives here as 0 rather than null (null is reserved for
+ *     §9.8.2's task filter). `x / 0` is not a number, and every way of
+ *     rendering it anyway asserts something false — `0%` that they achieved
+ *     none of what was asked, `100%` that they met a target nobody set. The
+ *     edge renders the absence instead, which is the same ruling §9.8.2 makes
+ *     when it omits an Expected column rather than zeroing it.
+ *   * **Unclamped, and it will disagree with the bar on purpose.**
+ *     `ProgressMeter` clamps its fill at 100% so an overshoot cannot paint
+ *     outside its track; that is a drawing constraint, not a fact. `156%` is
+ *     the true reading and the one worth knowing, and a card reading `100%`
+ *     next to `54:00:00 of 36:00:00` would be visibly wrong. The same split
+ *     `formatSecondsHms` already makes: it clamps negatives to `0:00:00` and
+ *     lets the surrounding words carry the sign.
+ *   * **Whole numbers.** `Math.round` matches `aria-valuenow`, the only
+ *     rounding precedent in the codebase; a timesheet percentage to two
+ *     decimals implies a precision the underlying schedule does not have.
+ *
+ * Negative worked is not defended against, because it cannot happen:
+ * `duration_seconds` is GENERATED from two timestamps with `ended_at >
+ * started_at` enforced by a CHECK.
+ */
+export function percentOf(
+  totalSeconds: number,
+  expectedSeconds: number | null,
+): number | null {
+  if (expectedSeconds === null || expectedSeconds === 0) {
+    return null;
+  }
+
+  const exact = (totalSeconds / expectedSeconds) * 100;
+  const rounded = Math.round(exact);
+
+  // **100% is reserved for actually meeting the target.** Rounding is fine
+  // everywhere else, but `Math.round` alone would turn 99.994% into `100%` and
+  // put it directly above "0:00:30 behind" — on a 144-hour month, anything
+  // within about two and a half minutes of target rounds to a claim that the
+  // target was met. The difference beneath is exact, so the two would visibly
+  // contradict each other, which is the one thing this function and
+  // `differenceSeconds` exist to prevent between them.
+  if (rounded === 100 && exact !== 100) {
+    return exact < 100 ? 99 : 101;
+  }
+
+  return rounded;
+}

@@ -724,19 +724,28 @@ pages wearing one name.
   it: today, this week and this month; §9.8's worked-vs-expected card; the last 14 days as
   a bar per day; this month by project; and the count of the caller's own correction
   requests still awaiting review.
-- **`/overview` is the team, and is admin-only** (§4.2.2). The month's hours, what was
-  logged today, who is on the clock, and how many corrections are waiting; §5.4's
-  stale-timer exception queue; §9.8's attendance for everyone, furthest behind first; the
-  last 14 days company-wide; and the month by project.
+- **`/overview` is the team, and is admin-only** (§4.2.2). §9.9.7's setup card; the
+  month's hours, what was logged today, who is on the clock, and how many corrections are
+  waiting; §5.4's stale-timer exception queue; the team's share of what it owed and a card
+  per employee, furthest behind first; the last 14 days company-wide; and the month by
+  project.
 
 **9.9.1 Every figure is a §9.3 or §9.8 aggregate.** No dashboard adds an RPC and no dashboard
 writes a query: the eleven actions in `lib/actions/reports.ts` produce every *number* on
 both surfaces, and going through them is what keeps §9.2's scoping in one place.
 
-Two reads on these pages are not report actions, and neither produces a figure:
-`listRunningTimers()` (§5.4's queue — rows, not totals, and there is no aggregate that could
-return them) and `listMemberProjectSchedules()` (which decides only which bars are dimmed,
-per §9.9.2). Anything that *is* a duration or a count comes from a report action.
+Some reads on these pages are not report actions, and none of them produces a
+*measurement*: `listRunningTimers()` (§5.4's queue — rows, not totals, and there is no
+aggregate that could return them), `listMemberProjectSchedules()` (which decides only which
+bars are dimmed, per §9.9.2), and the five behind §9.9.7's setup card — `listClients`,
+`listProjects`, `listMembers`, `listInvitations`, `listProjectMemberships` — which count
+what *exists* rather than measuring anything that happened. Anything that is a **duration**,
+or a count of time entries, comes from a report action.
+
+The line is between counting rows of structure and measuring work. "Four projects" is not a
+figure about time and no report function returns it — a by-project report groups
+`time_entries`, so it cannot even see a project nobody has logged against, which is exactly
+the project the setup card exists to move somebody past.
 
 Two consequences worth stating, because both look like invitations to shortcuts:
 
@@ -769,10 +778,30 @@ a working day" — because the schedule it reads is the one in force now and
 that say nothing about the fortnight before, and §9.8's accrual-from-`added_at` rule exists
 precisely because that gap is real. Present tense is the strongest claim the data supports.
 
-**9.9.3 A truncated list carries no total** (§12.2, `BLOCKERS.md` D-16). The attendance card
-shows the first several people and links to `/reports?grouping=user` for the rest, so it
-shows no sum; the project breakdown collapses its tail into one "Other" and likewise shows
-none. The range's totals are the tiles above, which come from `report_summary`.
+**9.9.3 A truncated list carries no total** (§12.2, `BLOCKERS.md` D-16) — so a card that
+wants a total must not truncate. The project breakdown collapses its tail into one "Other"
+and shows no sum, which is the rule taken one way. The employee cards take it the other:
+they render **every** person, precisely so the team card above them can carry a total whose
+line items are all on screen.
+
+*Amended.* The attendance card originally showed the worst eight and linked away for the
+rest, and therefore carried no sum — which left nothing on `/overview` saying what the
+company as a whole owed or delivered, because `report_summary.expectedSeconds` is null for a
+team-wide report (§9.8.1) and no RPC returns a company-wide expected figure. Dropping the
+truncation is what bought the total. The cost is a longer page for a large team, which
+`/reports` already pays over the same set of rows.
+
+**Both of that card's figures are summed from the cards beneath, over the same people, and
+that is a correctness requirement rather than a convenience.** A percentage is a ratio, so
+its numerator and denominator must describe one population. Pairing
+`report_summary.totalSeconds` — every hour in the company — with an expected figure only
+scheduled people can contribute to would let one contractor with no target push the team
+past 100% while every individual card sat below it. So both sides exclude anybody without a
+schedule, and the card says how many people that is.
+
+The company-wide worked total is a different claim and keeps its own place: the tile above,
+from `report_summary`, §9.8.1's sanctioned source. When somebody has no schedule the two
+figures differ by exactly their hours.
 
 **9.9.4 §9.8.2's two disclosures apply wherever worked meets expected**, which on a
 dashboard is the month card and the attendance rows: today is counted in full, and a running
@@ -788,6 +817,66 @@ stay server-rendered; and the test environment is jsdom, which has no layout and
 measure every column in a real charting library at zero. §12.3's "a build chunk with its own
 dependency" bar is the one a chart library would have to clear, and for bars and meters it
 does not.
+
+**9.9.6 [R] Percentages.** The employee cards are the first place in this product that shows
+a user a percentage — before them the only percentages anywhere were CSS lengths and
+`aria-valuenow`, and the only formatting convention in the codebase was `formatSecondsHms`.
+So this fixes the convention, and `percentOf` in `components/reports/report-expected.ts` is
+the one place a percentage is produced, sitting beside `differenceSeconds` because the two
+are the same statement about the same pair of numbers in two registers.
+
+- **A percentage requires something to be a percentage of.** A null target *and a zero one*
+  both yield no percentage; the edge renders `—`. Zero is the live case, not a theoretical
+  one: `mergeExpectedByUser` gives somebody with no schedule an expected of `0` by design
+  (null is reserved for §9.8.2's task filter), and every way of rendering a percentage
+  against zero asserts something false — `0%` that they achieved none of what was asked,
+  `100%` that they met a target nobody set. This is §9.8.2's omit-rather-than-zero rule
+  applied to a new figure.
+- **A zero percentage and no percentage are different, and must look different.** Somebody
+  who logged nothing against a real 36-hour target is `0%`, which is a measurement. Somebody
+  with no target is `—`. Collapsing the two would hide the second, which is the one an admin
+  can act on.
+- **The text does not clamp; the bar does.** `ProgressMeter` holds its fill at 100% so an
+  overshoot cannot paint outside its track — a drawing constraint, not a fact — while the
+  number reads `150%`, which is true and is the interesting part. The same split
+  `formatSecondsHms` already makes by clamping negatives and letting the surrounding words
+  carry the sign. Any surface showing both must expect them to disagree above 100% and must
+  not "fix" it.
+- **One predicate governs the figure, the bar and the caption.** Wherever a percentage is
+  absent, the meter renders no `progressbar` and the card prints no target — a card reading
+  `—` above a full bar, or above "of 0:00:00", is the same lie told twice.
+- **Whole numbers**, `Math.round`, matching `aria-valuenow`. A timesheet percentage to two
+  decimals implies a precision the schedule behind it does not have.
+
+**9.9.7 [R] The setup checklist.** `/overview` opens with a card naming the order a company
+has to be built in — client, then project, then people — with a button for each that opens
+the existing form in a dialog. It is **guidance and a set of shortcuts, not a wizard**: the
+steps are independent, nothing is chained, and no step is blocked by an earlier one.
+
+**The order it teaches is the schema's, not a preference.** A project hangs off a client or
+off nothing (§3.4); nobody can log time to a project they are not assigned to (§3.6.1); and
+nobody can be assigned to a project until they have accepted an invitation, because
+`project_members.(user_id, company_id)` references `profiles` and an invitee has no such row
+until `accept_invitation()` gives them one. Before this card, an admin discovered that
+sequence by failing at it — there was no first-run guidance anywhere in the product.
+
+- **The tip is static and is rendered in both states.** The card shrinks to the tip and three
+  buttons once every step has something in it, rather than disappearing: those three buttons
+  are the only place in the app where all three creation paths sit together, and the order
+  does not stop being true once a company is set up.
+- **The gap between "invited" and "can log time" is displayed, not hidden.** An invitation
+  adds somebody to the *company*; they still cannot record a minute until they accept and
+  are put on a project. So the card carries two lines that appear only when they apply — "N
+  invitations are waiting to be accepted" and "N members aren't on any project yet, so they
+  can't log time" — each linking to where it is finished. A dashboard that showed a tidy
+  three-step flow and left the admin wondering why their new employee logs nothing would be
+  worse than no guidance at all.
+- **Closing that gap for real is a migration, and it is not taken here.** It would mean
+  `invitations.project_id` plus the schedule columns and an edit to the `SECURITY DEFINER`
+  `accept_invitation()`, which §0.2 says lands alone. Recorded in `BLOCKERS.md` D-20 with the
+  one thing in its favour that anybody proposing it should know: `project_members.added_at`
+  would become the moment of acceptance, which is when the person could first log time, so
+  §9.8's accrual would get *more* correct rather than less.
 
 ---
 
@@ -888,6 +977,17 @@ Run after any migration touching RLS or `time_entries`. Two browser profiles, tw
 - [ ] With more people than the attendance card shows, it says so and carries no total
 - [ ] A project the caller can no longer read shows as "Unknown project", muted — never blank, never "null"
 - [ ] In a DST-at-midnight zone (`America/Havana`), the chart's last bar is the company's today and no month boundary shifts a day
+- [ ] The team card's two figures each equal the sum of the employee cards beneath it, and exclude anybody reading `—` (§9.9.3). With everybody scheduled, its worked figure equals the "Hours this month" tile; with somebody unscheduled, it is lower by their hours
+- [ ] A count the page could not read shows as an absence on the setup card, which does not collapse and states no follow-up it cannot support
+- [ ] A deactivated member who was never on a project does not hold the "isn't on any project yet" line open
+- [ ] Every employee has a card — eleven people, eleven cards, and no "showing N of M"
+- [ ] Somebody over their target reads above 100% in text while their bar stays full (§9.9.6)
+- [ ] Somebody with no schedule reads `—`, has no progressbar, and shows no "of 0:00:00"
+- [ ] Somebody who logged nothing against a real target reads `0%` and keeps their bar — a measurement, not an absence
+- [ ] The setup card is tall with steps while anything is missing and collapses to the tip plus three buttons when nothing is; the tip is present either way
+- [ ] Each of the three dialogs creates its row and the page reflects it without a reload
+- [ ] The invite dialog does **not** close on success and the link is still copyable
+- [ ] Invite somebody: "N invitations are waiting". Accept: that line goes and "N members aren't on any project yet" appears. Assign them: both go
 
 **Time & reporting**
 - [ ] A 22:00→03:00 entry appears entirely on the start day, in company timezone

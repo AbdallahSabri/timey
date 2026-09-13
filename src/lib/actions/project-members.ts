@@ -429,6 +429,60 @@ export async function listProjectMembers(
 }
 
 /**
+ * Every (project, person) pair in the company, and nothing else about them
+ * (`SPEC.md` §9.9.1).
+ *
+ * **It answers one question: who is on no project at all.** §9.9.7's setup
+ * card tells an admin that an invited employee who has accepted still cannot
+ * log time until somebody assigns them, and that sentence needs the set of
+ * assigned people — not any one project's members. `listProjectMembers` would
+ * answer it one project at a time, which is N+1 reads to compute a single
+ * count.
+ *
+ * **Rows, not a figure**, which is what makes it admissible on a dashboard:
+ * §9.9.1 confines every *number* to `lib/actions/reports.ts` and carves out the
+ * reads that return rows instead — `listRunningTimers()` for §5.4's queue,
+ * `listMemberProjectSchedules()` for the chart dimming, and this. The counting
+ * happens at the edge, over rows that are on screen or derived from them.
+ *
+ * Deliberately **not** role-gated and **not** `company_id`-filtered, the same
+ * way `listPendingCorrectionRequests` argues for the identical case:
+ * `project_members_select_own_company` is the boundary and it is company-wide
+ * (§3.6.2), so a `role === "admin"` test here would be a third opinion free to
+ * disagree with it. An employee calling this gets their own company's
+ * assignment graph, which §3.6.2 already accepts they can read.
+ *
+ * It carries no schedule and no name on purpose. Both exist on the two reads
+ * above, and a third shape that also had them would be a third thing to keep in
+ * step with 0014's columns.
+ */
+export async function listProjectMemberships(): Promise<
+  ActionResult<{ projectId: string; userId: string }[]>
+> {
+  try {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+      .from("project_members")
+      .select("project_id, user_id");
+
+    if (error) {
+      return { ok: false, error: "Could not load project assignments." };
+    }
+
+    return {
+      ok: true,
+      data: data.map((row) => ({
+        projectId: row.project_id,
+        userId: row.user_id,
+      })),
+    };
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+}
+
+/**
  * The same rows as `listProjectMembers`, pivoted: one person's assignments
  * across every project, which is what the Team page's schedule dialog edits.
  *

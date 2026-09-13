@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import type { Client } from "@/lib/actions/clients";
-import { createProject } from "@/lib/actions/projects";
+import { createProject, type Project } from "@/lib/actions/projects";
 import { projectSchema, type ProjectInput } from "@/lib/validations/structure";
 
 import type { z } from "zod";
@@ -34,7 +34,18 @@ type ProjectValues = z.output<typeof projectSchema>;
  * client-side rule the database does not enforce would be a rule only the
  * honest path obeys.
  */
-export function CreateProjectForm({ clients }: { clients: Client[] }) {
+export function CreateProjectForm({
+  clients,
+  onCompleted,
+}: {
+  clients: Client[];
+  /**
+   * Called with the created project after the toast and the reset, and before
+   * `router.refresh()`. A dialog closes on it; §9.9.7's setup card uses it for
+   * nothing else, because the steps are deliberately not chained.
+   */
+  onCompleted?: (project: Project) => void;
+}) {
   const router = useRouter();
 
   const form = useForm<ProjectInput, unknown, ProjectValues>({
@@ -58,6 +69,7 @@ export function CreateProjectForm({ clients }: { clients: Client[] }) {
     // on insert, so there is no task step between here and logging time.
     toast.success(`${result.data.name} is ready, with a "General" task.`);
     form.reset({ name: "", description: "", clientId: values.clientId ?? "" });
+    onCompleted?.(result.data);
     router.refresh();
   }
 

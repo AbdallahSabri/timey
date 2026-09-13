@@ -568,6 +568,60 @@ actions → helpers → UI, not migrations → types → actions → UI.
 
 ---
 
+## Phase 11 — Employee cards and the setup flow
+
+**Implements:** `SPEC.md` §9.9.6, §9.9.7, and amendments to §9.9, §9.9.1, §9.9.3
+**Agents:** `implement-logic` → `build-ui`
+**Depends on:** Phase 10
+
+Phase 10 put the team's data on one page. Two things it got wrong for the person who reads
+it: the attendance card was a table in all but markup, with no percentage and no team-wide
+figure at all; and nothing anywhere told a new admin that a company is built
+client → project → people, in that order, for reasons the schema enforces.
+
+**No migration.** One new row read and five existing ones; every figure still comes from a
+Phase 8 or Phase 9 report action.
+
+### Work items
+
+**Actions**
+- `listProjectMemberships()` — `(project_id, user_id)` for the company, one query. It exists
+  to answer "who is on no project at all", which `listProjectMembers` answers only N+1 times.
+  Rows, not a figure, which is what makes it admissible on a dashboard (§9.9.1).
+- `onCompleted` / `onSent` on the three creation forms, so a dialog can close itself. The
+  invite form's callback is **not** a close signal — its link is shown once.
+
+**The percentage (§9.9.6)** — the first in the product, so it sets the convention. `percentOf`
+beside `differenceSeconds`. Null for a null *or zero* target; unclamped text against a
+clamped bar; whole numbers. And one predicate governing the figure, the bar and the caption:
+a `—` above a full bar is the same lie told twice.
+
+**UI**
+- A card per employee, every employee, worst first. Dropping the truncation is what lets the
+  team card carry a total (§9.9.3) — that is the trade, made deliberately.
+- The team card's two figures come from two places and it says so: worked from
+  `report_summary`, expected summed from the cards beneath, because nothing else computes it.
+- The setup card, always present, collapsing when done, with the invite → assign gap stated
+  out loud rather than smoothed over.
+
+### Exit criteria
+- Gate green.
+- The team card's expected total equals the sum of the cards under it, and its worked figure
+  equals the tile above it.
+- A person with no schedule, a person at 0% of a real target, and a person over 100% all read
+  differently and correctly.
+
+### Manual verification (§12.2)
+- [ ] Both figures on the team card cross-check as above
+- [ ] Eleven people, eleven cards, no truncation line
+- [ ] Over-target reads past 100% in text with a full bar
+- [ ] No-schedule reads `—`, with no bar and no invented target
+- [ ] The setup card's two states, and the tip in both
+- [ ] The invite dialog does not close on success
+- [ ] The pending-invitation and unassigned-member lines appear and clear correctly
+
+---
+
 ---
 
 ## Sequencing rationale
