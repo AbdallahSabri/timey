@@ -5,8 +5,16 @@ import { DayBarChart, type DayBar } from "@/components/charts/day-bar-chart";
 import { fillDaySeries, maxSecondsOf } from "@/components/charts/day-series";
 import { ProportionBarList } from "@/components/charts/proportion-bar-list";
 import { topNWithOther } from "@/components/charts/top-n";
-import { teamTotals } from "@/components/dashboard/attendance-rows";
+import {
+  byShortfall,
+  teamTotals,
+} from "@/components/dashboard/attendance-rows";
+import { EmployeeDayTabs } from "@/components/dashboard/employee-day-tabs";
 import { EmployeeProgressGrid } from "@/components/dashboard/employee-progress-grid";
+import {
+  EMPLOYEE_PARAM,
+  resolveSelectedEmployee,
+} from "@/components/dashboard/overview-params";
 import { SetupChecklist } from "@/components/dashboard/setup-checklist";
 import { unassignedMemberCount } from "@/components/dashboard/setup-state";
 import { TeamProgressCard } from "@/components/dashboard/team-progress-card";
@@ -24,6 +32,7 @@ import {
 } from "@/components/reports/report-params";
 import {
   NO_CLIENT_CELL,
+  UNKNOWN_PERSON,
   UNKNOWN_PROJECT,
 } from "@/components/reports/report-rows";
 import {
@@ -44,7 +53,10 @@ import { listClients } from "@/lib/actions/clients";
 import { getCurrentMember, listMembers } from "@/lib/actions/companies";
 import { listPendingCorrectionRequests } from "@/lib/actions/corrections";
 import { listInvitations } from "@/lib/actions/invitations";
-import { listProjectMemberships } from "@/lib/actions/project-members";
+import {
+  listMemberProjectSchedules,
+  listProjectMemberships,
+} from "@/lib/actions/project-members";
 import { listProjects } from "@/lib/actions/projects";
 import {
   getReportByDay,
@@ -110,7 +122,12 @@ const RUNNING_LIMIT = 8;
  * adds nothing at all — it *picks* one bucket out of the day series, the same
  * bucket the chart draws as today's bar.
  */
-export default async function OverviewPage() {
+export default async function OverviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
   const memberResult = await getCurrentMember();
   const member = memberResult.ok ? memberResult.data : null;
   const isAdmin = member?.role === "admin" && member.status === "active";
@@ -141,9 +158,24 @@ export default async function OverviewPage() {
     taskId: undefined,
   };
 
+  // **Awaited before the rest, and only this one.** The day-by-day panel needs a
+  // selected employee, and the selection is resolved against these rows — so
+  // everything else, including the panel's own two reads, can start as soon as
+  // this returns rather than waiting on eleven reads it does not depend on.
+  const attendanceResult = await getReportByUser(monthRange);
+  const attendanceRows = attendanceResult.ok ? attendanceResult.data : [];
+  const orderedRows = byShortfall(attendanceRows);
+  const selectedUserId = resolveSelectedEmployee(
+    params[EMPLOYEE_PARAM],
+    orderedRows,
+  );
+  const selectedRow = orderedRows.find((row) => row.userId === selectedUserId);
+  const selectedName = selectedRow
+    ? (selectedRow.userName ?? UNKNOWN_PERSON)
+    : null;
+
   const [
     summaryResult,
-    attendanceResult,
     daysResult,
     projectsResult,
     runningResult,
@@ -153,11 +185,10 @@ export default async function OverviewPage() {
     membersResult,
     invitationsResult,
     membershipsResult,
+    selectedDaysResult,
+    selectedSchedulesResult,
   ] = await Promise.all([
     getReportSummary(monthRange),
-    // Already union-merged with expected hours (§9.8.3) — the people who logged
-    // nothing arrive from this one call, which is why there is no second one.
-    getReportByUser(monthRange),
     getReportByDay({ ...monthRange, from: chartFrom }),
     getReportByProject(monthRange),
     listRunningTimers(),
@@ -175,6 +206,19 @@ export default async function OverviewPage() {
     listMembers(),
     listInvitations(),
     listProjectMemberships(),
+    // §9.9.8's panel. One employee's series and their own working days — one
+    // pair of reads whoever is selected, which is the whole reason the section
+    // shows one person rather than a chart each.
+    selectedUserId
+      ? getReportByDay({
+          ...monthRange,
+          from: chartFrom,
+          userId: selectedUserId,
+        })
+      : Promise.resolve(null),
+    selectedUserId
+      ? listMemberProjectSchedules(selectedUserId)
+      : Promise.resolve(null),
   ]);
 
   // §5.4's threshold is the company's own setting; the constant only backs up
@@ -249,7 +293,32 @@ export default async function OverviewPage() {
     : [];
 
   const monthLabel = formatDayRange(monthStart, today);
-  const attendanceRows = attendanceResult.ok ? attendanceResult.data : [];
+
+  const selectedDays =
+    selectedDaysResult && selectedDaysResult.ok
+      ? fillDaySeries(selectedDaysResult.data, chartFrom, today)
+      : [];
+
+  const selectedWorkingDays = new Set(
+    (selectedSchedulesResult?.ok ? selectedSchedulesResult.data : []).flatMap(
+      (schedule) =>
+        schedule.expectedDailySeconds > 0 ? schedule.workingDays : [],
+    ),
+  );
+
+  const selectedBars: DayBar[] = selectedDays.map((day) => {
+    const weekday = dayOfWeek(day.day) ?? 1;
+
+    return {
+      day: day.day,
+      totalSeconds: day.totalSeconds,
+      weekday,
+      // Nothing is dimmed when this person has no schedule: dimming every day
+      // would imply they are never due in (§9.9.2).
+      offDay: selectedWorkingDays.size > 0 && !selectedWorkingDays.has(weekday),
+      isToday: day.day === today,
+    };
+  });
 
   // Counted from rows the cards below render, which is what §12.2 asks of a
   // total — see `teamTotals` for why only the expected side is summed here and
@@ -422,7 +491,7 @@ export default async function OverviewPage() {
               />
 
               <EmployeeProgressGrid
-                rows={attendanceRows}
+                rows={orderedRows}
                 runningUserIds={runningUserIds}
                 from={monthStart}
                 to={today}
@@ -443,6 +512,46 @@ export default async function OverviewPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* The drill-down from the cards above: they say who is behind, this says
+          behind *how*. Five short days and one missing week produce the same
+          month figure and the same percentage — only the daily shape separates
+          them, and the company-wide chart below cannot show it because eleven
+          people's days sum into one bar (§9.9.8). */}
+      {orderedRows.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Day by day</CardTitle>
+            <CardDescription>
+              One person&rsquo;s last {CHART_DAYS} days.
+              {selectedWorkingDays.size > 0
+                ? " Days they aren’t scheduled on are dimmed; a day they were due in and logged nothing is an empty bar, which is the distinction this card exists for."
+                : " Nothing is dimmed: this person has no expected hours on any project, so no day is more owed than another."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EmployeeDayTabs rows={orderedRows} selectedUserId={selectedUserId}>
+              {selectedDaysResult && !selectedDaysResult.ok ? (
+                <p className="text-destructive text-sm">
+                  {selectedDaysResult.error}
+                </p>
+              ) : (
+                // Both strings name the employee. Without it the list's
+                // accessible name is byte-identical for every person on the
+                // page, and "They logged nothing" has no antecedent — so a
+                // screen-reader user gets the one distinction this section
+                // exists to draw with no way to tell whom it is about.
+                <DayBarChart
+                  bars={selectedBars}
+                  maxSeconds={maxSecondsOf(selectedDays)}
+                  label={`${selectedName}: hours per day, ${formatDayRange(chartFrom, today)}`}
+                  emptyLabel={`${selectedName} logged nothing between ${formatDayRange(chartFrom, today)}.`}
+                />
+              )}
+            </EmployeeDayTabs>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

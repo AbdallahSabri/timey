@@ -199,7 +199,7 @@ RLS-adjacent surface, and the automated suite verifies none of it.
 | `/onboarding` | Signed in, no company | Create a company and become its admin. The only valid `company_id IS NULL` state |
 | `/invite/[token]` | Any state | Accept an invitation; refuses plainly if you already belong to a company |
 | `/dashboard` | Members | The running timer, today's entries, manual entry, the stale-timer prompt; your own figures for today, the week and the month, the last 14 days, and where the month went |
-| `/overview` | **Admins** | The team: a setup checklist (client → project → people), hours this month, who is on the clock, stale timers, the team's share of its target and a card per employee, the last 14 days, the month by project |
+| `/overview` | **Admins** | The team: a setup checklist (client → project → people), hours this month, who is on the clock, stale timers, the team's share of its target and a card per employee, one employee's last 14 days, the last 14 days company-wide, the month by project |
 | `/projects`, `/projects/[id]` | Members | Projects (assigned ones for an employee), tasks, project membership |
 | `/clients` | Members | Clients, archive/unarchive |
 | `/members` | Members | The team list; role changes and deactivation are admin-gated at the database |

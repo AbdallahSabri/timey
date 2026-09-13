@@ -727,8 +727,8 @@ pages wearing one name.
 - **`/overview` is the team, and is admin-only** (§4.2.2). §9.9.7's setup card; the
   month's hours, what was logged today, who is on the clock, and how many corrections are
   waiting; §5.4's stale-timer exception queue; the team's share of what it owed and a card
-  per employee, furthest behind first; the last 14 days company-wide; and the month by
-  project.
+  per employee, furthest behind first; one selected employee's last 14 days; the last 14
+  days company-wide; and the month by project.
 
 **9.9.1 Every figure is a §9.3 or §9.8 aggregate.** No dashboard adds an RPC and no dashboard
 writes a query: the eleven actions in `lib/actions/reports.ts` produce every *number* on
@@ -878,6 +878,40 @@ sequence by failing at it — there was no first-run guidance anywhere in the pr
   would become the moment of acceptance, which is when the person could first log time, so
   §9.8's accrual would get *more* correct rather than less.
 
+
+**9.9.8 [R] One employee's days.** The cards in §9.9.3 answer *who* is behind; they cannot
+answer *how*. Five short days and one missing week produce the same month total and the same
+percentage, and the company-wide day chart cannot separate them either, because everybody's
+days sum into one bar. So `/overview` carries a row of employees and one panel: the selected
+person's last fourteen days, drawn with the same `DayBarChart` the other two charts use.
+
+- **One person at a time, because one person is one query.** There is no `report_by_user_day`
+  function — `report_by_day` takes a single `p_user_id` — so a chart per employee would cost
+  one RPC per employee on every page load. Selecting one holds that at two reads (the
+  series, and that person's working days) whatever the size of the company. **The section
+  opens by default**, so those two reads are paid on every render; what the design avoids is
+  the *N*, not the cost itself.
+- **Links with the selection in the URL, not a tab widget.** Each panel is a different query
+  the server answers, which is the case `report-view-tabs.tsx` already argues: rendering the
+  row as links means the back button, a middle-click and a bookmark all mean what they look
+  like they mean, and the panel is server-rendered like every other card. It also leaves
+  `tabs` off the dependency list — the **third** control to arrive there, after
+  `ReportViewTabs` and `/corrections`, which is the very need §12.3's table lists `tabs`
+  against and which declined it on reasoning of its own.
+- **Therefore no `role="tab"` and no `role="tabpanel"`, ever.** Those roles promise a widget
+  that swaps a panel in place without navigating; a screen-reader user who activated one
+  would find the page had moved instead. A labelled `nav` of links carrying `aria-current`
+  describes what actually happens.
+- **An id the page cannot account for falls back to the default rather than being honoured.**
+  `report_by_day` is `SECURITY INVOKER`, so an id from another company returns zero rows —
+  which would render as a real panel of empty bars, indistinguishable from somebody who
+  logged nothing. RLS makes that harmless; falling back makes it honest.
+- **The default panel is whoever is furthest behind**, the same order the cards use, so the
+  section opens on the person an admin most likely came to look at.
+- **Dimming is that person's own working days**, not the weekend — the one place on this page
+  where §9.9.2's per-person dimming is available, because the panel is scoped to one person.
+  Where they have no schedule nothing is dimmed, for §9.9.2's reason.
+
 ---
 
 ## 10. Open Decisions
@@ -980,6 +1014,10 @@ Run after any migration touching RLS or `time_entries`. Two browser profiles, tw
 - [ ] The team card's two figures each equal the sum of the employee cards beneath it, and exclude anybody reading `—` (§9.9.3). With everybody scheduled, its worked figure equals the "Hours this month" tile; with somebody unscheduled, it is lower by their hours
 - [ ] A count the page could not read shows as an absence on the setup card, which does not collapse and states no follow-up it cannot support
 - [ ] A deactivated member who was never on a project does not hold the "isn't on any project yet" line open
+- [ ] The day-by-day section opens on the employee furthest behind, and the tab row carries everyone with hours or a schedule in the range — somebody with neither has no card either, so the two agree
+- [ ] Picking a tab changes the URL, and the browser's back button returns to the previous employee
+- [ ] A hand-edited `?employee=` naming nobody on the page falls back to the default panel rather than rendering empty bars under a stranger's name
+- [ ] The panel dims that person's own non-working days, and dims nothing when they have no schedule
 - [ ] Every employee has a card — eleven people, eleven cards, and no "showing N of M"
 - [ ] Somebody over their target reads above 100% in text while their bar stays full (§9.9.6)
 - [ ] Somebody with no schedule reads `—`, has no progressbar, and shows no "of 0:00:00"
@@ -1014,5 +1052,7 @@ Run after any migration touching RLS or `time_entries`. Two browser profiles, tw
 Note: the report and queue grids need a sortable, filterable data table. In shadcn that's a TanStack Table recipe, not a single primitive — treat it as a build chunk with its own dependency, not a `pnpm dlx` away.
 
 *Amended.* Every primitive in the "needed" table has since been installed, and the data table was built on `@tanstack/react-table` as described. **§9.9's charts add no primitive and no dependency**: the bar charts, the proportion bars and the worked-vs-expected meter are hand-written in `src/components/charts/` against the `--chart-*` tokens, for the three reasons §9.9.5 gives. This is the standing answer to the next person who reaches for a charting library — it is the "build chunk with its own dependency" bar above, and for bars and meters it is not cleared.
+
+`tabs` is still listed above and is still not installed, and three separate surfaces have now each decided against it rather than one: `/corrections` — the very need this table lists it against — chose two sections over two tabbed panels; `ReportViewTabs` chose links for §9's two views; and §9.9.8's employee row chose links again. The common reason is that in this app a "tab" is almost always a different query the server answers, not markup a client can hide and show. Treat the row above as answered in the negative rather than outstanding.
 
 Add via `pnpm dlx shadcn@latest add <name>`. Per `CLAUDE.md`, generated files in `src/components/ui/**` are not hand-edited.

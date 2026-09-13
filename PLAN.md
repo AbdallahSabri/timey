@@ -603,6 +603,11 @@ a `—` above a full bar is the same lie told twice.
   `report_summary`, expected summed from the cards beneath, because nothing else computes it.
 - The setup card, always present, collapsing when done, with the invite → assign gap stated
   out loud rather than smoothed over.
+- A row of employees and one day-by-day panel (§9.9.8). Links with the selection in the URL,
+  not a tab widget — each panel is a query the server answers, which is the case
+  `report-view-tabs.tsx` already argues, and it keeps `tabs` off the dependency list. One
+  person at a time because `report_by_day` takes one `p_user_id`: a panel per employee would
+  be one RPC per employee on every load.
 
 ### Exit criteria
 - Gate green.
@@ -619,6 +624,8 @@ a `—` above a full bar is the same lie told twice.
 - [ ] The setup card's two states, and the tip in both
 - [ ] The invite dialog does not close on success
 - [ ] The pending-invitation and unassigned-member lines appear and clear correctly
+- [ ] The day-by-day tabs change the URL, the back button works, and a bogus `?employee=`
+      falls back rather than rendering empty bars under a stranger's name
 
 ---
 
