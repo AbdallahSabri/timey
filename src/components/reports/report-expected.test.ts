@@ -4,6 +4,7 @@ import {
   differenceSeconds,
   mergeExpectedByUser,
   mergeExpectedByUserProject,
+  percentOf,
 } from "@/components/reports/report-expected";
 import type {
   ActualUserProjectTotals,
@@ -232,5 +233,61 @@ describe("differenceSeconds", () => {
     // §9.8.2: under a task filter there is no such thing as hours owed, and a
     // zero would assert that nothing was expected.
     expect(differenceSeconds(58540, null)).toBeNull();
+  });
+});
+
+describe("percentOf", () => {
+  it("reads worked as a share of expected", () => {
+    expect(percentOf(36_000, 72_000)).toBe(50);
+    expect(percentOf(72_000, 72_000)).toBe(100);
+  });
+
+  it("does NOT clamp above 100, unlike the bar beside it", () => {
+    // ProgressMeter clamps its fill so an overshoot cannot paint outside the
+    // track — a drawing constraint, not a fact. 150% is the true reading, and a
+    // card saying 100% next to "54:00:00 of 36:00:00" would be visibly wrong.
+    expect(percentOf(108_000, 72_000)).toBe(150);
+    expect(percentOf(720_000, 72_000)).toBe(1000);
+  });
+
+  it("is null when there is nothing to be a percentage of", () => {
+    // Zero is the live case: `mergeExpectedByUser` gives somebody with no
+    // schedule an expected of 0, not null. Both must refuse to produce a
+    // number — 0% would claim they achieved none of what was asked, and 100%
+    // that they met a target nobody set.
+    expect(percentOf(36_000, 0)).toBe(null);
+    expect(percentOf(36_000, null)).toBe(null);
+    expect(percentOf(0, 0)).toBe(null);
+  });
+
+  it("distinguishes a real zero from no target at all", () => {
+    // Logging nothing against a real 10-hour target IS a measurement, and it
+    // must not come back as the same absence as "nobody set one".
+    expect(percentOf(0, 36_000)).toBe(0);
+    expect(percentOf(0, null)).toBe(null);
+  });
+
+  it("rounds to whole numbers", () => {
+    // `aria-valuenow` is the only rounding precedent, and a timesheet
+    // percentage to two decimals implies precision the schedule lacks.
+    expect(percentOf(1, 3)).toBe(33);
+    expect(percentOf(2, 3)).toBe(67);
+  });
+
+  it("keeps 100% for a target that was actually met", () => {
+    // 99.994% must not render as "100%" above "0:00:30 behind"; 100.006% must
+    // not render as "100%" above "0:00:30 ahead". Only an exact hit is 100.
+    expect(percentOf(518_400, 518_400)).toBe(100);
+    expect(percentOf(518_370, 518_400)).toBe(99);
+    expect(percentOf(518_430, 518_400)).toBe(101);
+  });
+
+  it("agrees in sign with differenceSeconds", () => {
+    // The two are the same statement in two registers. A card showing "92%"
+    // above "3:00:00 ahead" is the disagreement this pairing must not produce.
+    const worked = 33_000;
+    const expected = 36_000;
+    expect(percentOf(worked, expected)).toBeLessThan(100);
+    expect(differenceSeconds(worked, expected)).toBeLessThan(0);
   });
 });

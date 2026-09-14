@@ -1,12 +1,9 @@
 import { differenceSeconds } from "@/components/reports/report-expected";
+import { StatTile, StatTileGrid } from "@/components/structure/stat-tile";
 import { Card, CardContent } from "@/components/ui/card";
 import type { ReportSummary } from "@/lib/actions/reports";
 import { formatSecondsHms } from "@/lib/reports/csv";
 import { cn } from "@/lib/utils";
-
-/** The figures are set alike, and like the running clock they echo. */
-const FIGURE_CLASS =
-  "font-mono text-3xl leading-none font-medium tracking-tight tabular-nums";
 
 /**
  * §9.4's header figures, above whichever grouping is on screen.
@@ -51,81 +48,65 @@ export function ReportSummaryHeader({
   return (
     <Card>
       {/* Three figures stay on one row as they always have. A fourth would
-          crush them into quarters of a phone-width card, so it pairs them two
-          up first and only spreads to four where there is room. */}
-      <CardContent
-        className={cn(
-          "grid gap-6",
-          expectedSeconds === null
-            ? "sm:grid-cols-3"
-            : "sm:grid-cols-2 lg:grid-cols-4",
-        )}
-      >
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-sm">Total time</span>
-          <span className={FIGURE_CLASS}>
-            {formatSecondsHms(summary.totalSeconds)}
-          </span>
-          <span className="text-muted-foreground text-xs">{rangeLabel}</span>
-        </div>
+          crush them into quarters of a phone-width card, so `StatTileGrid`
+          pairs them two up first and only spreads to four where there is
+          room. */}
+      <CardContent>
+        <StatTileGrid columns={expectedSeconds === null ? 3 : 4}>
+          <StatTile
+            label="Total time"
+            figure={formatSecondsHms(summary.totalSeconds)}
+            caption={rangeLabel}
+          />
 
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-sm">Entries</span>
-          <span className={FIGURE_CLASS}>{summary.entryCount}</span>
-          <span className="text-muted-foreground text-xs">
-            Closed entries in this range
-          </span>
-        </div>
+          <StatTile
+            label="Entries"
+            figure={summary.entryCount}
+            caption="Closed entries in this range"
+          />
 
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-sm">Running now</span>
           {/* Amber only when there is something in flight — the colour marks a
               live timer, and a zero is not one. */}
-          <span
-            className={cn(
-              FIGURE_CLASS,
-              summary.runningCount > 0 && "text-live",
-            )}
-          >
-            {summary.runningCount}
-          </span>
-          <span className="text-muted-foreground text-xs">
-            {summary.runningCount === 0
-              ? "No timers in flight"
-              : "Not counted until stopped"}
-          </span>
-        </div>
+          <StatTile
+            label="Running now"
+            figure={summary.runningCount}
+            live={summary.runningCount > 0}
+            caption={
+              summary.runningCount === 0
+                ? "No timers in flight"
+                : "Not counted until stopped"
+            }
+          />
 
-        {expectedSeconds === null ? null : (
-          <div className="flex flex-col gap-1">
-            <span className="text-muted-foreground text-sm">Expected</span>
-            <span className={FIGURE_CLASS}>
-              {formatSecondsHms(expectedSeconds)}
-            </span>
-            <span className="text-muted-foreground text-xs">
-              {difference === null || difference === 0 ? (
-                "Exactly on target"
-              ) : (
-                <>
-                  {/* Ledger green for at-or-above, plain text for behind — and
-                      never amber, which marks a running timer and nothing else.
-                      Not `destructive` either: §9.8 counts today in full, so a
-                      figure that reads short is the ordinary state of a
-                      Tuesday morning rather than a fault. */}
-                  <span
-                    className={cn(
-                      "font-mono tabular-nums",
-                      behind ? "text-foreground" : "text-primary",
-                    )}
-                  >
-                    {formatSecondsHms(Math.abs(difference))}
-                  </span>{" "}
-                  {behind ? "behind" : "ahead"}
-                </>
-              )}
-            </span>
-          </div>
-        )}
+          {expectedSeconds === null ? null : (
+            <StatTile
+              label="Expected"
+              figure={formatSecondsHms(expectedSeconds)}
+              caption={
+                difference === null || difference === 0 ? (
+                  "Exactly on target"
+                ) : (
+                  <>
+                    {/* Ledger green for at-or-above, plain text for behind —
+                        and never amber, which marks a running timer and nothing
+                        else. Not `destructive` either: §9.8 counts today in
+                        full, so a figure that reads short is the ordinary state
+                        of a Tuesday morning rather than a fault. */}
+                    <span
+                      className={cn(
+                        "font-mono tabular-nums",
+                        behind ? "text-foreground" : "text-primary",
+                      )}
+                    >
+                      {formatSecondsHms(Math.abs(difference))}
+                    </span>{" "}
+                    {behind ? "behind" : "ahead"}
+                  </>
+                )
+              }
+            />
+          )}
+        </StatTileGrid>
       </CardContent>
     </Card>
   );

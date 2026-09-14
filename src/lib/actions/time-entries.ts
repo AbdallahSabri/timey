@@ -103,6 +103,37 @@ const ENTRY_COLUMNS =
 
 const ENTRY_COLUMNS_WITH_LABELS = `${ENTRY_COLUMNS}, projects (id, name), tasks (id, name)`;
 
+/**
+ * One person's timer, seen from the team's side (§9.9) — what `/overview`'s
+ * on-the-clock list and §5.4's stale queue are both built from.
+ *
+ * **Every label is nullable and each null means something specific**, the same
+ * way `TimeEntryWithLabels` documents its two. `userName` is null when the
+ * `profiles` row is unreadable, which company-wide SELECT (§4.2) makes rare
+ * rather than impossible; `projectName` and `taskName` are null for the §2.3 /
+ * §3.6.1 case the rest of this file names — a project the *caller* can no
+ * longer read. Rendering "—" or "Unknown person" there is correct; dropping the
+ * row is not, because a timer nobody can label is still a timer that is
+ * running, and it is precisely the kind §5.4 exists to surface.
+ *
+ * **`startedAt` is the stored UTC instant and there is no duration field**, by
+ * construction: `duration_seconds` is GENERATED from `ended_at` and is
+ * therefore NULL on every row this returns (§3.7). Elapsed time is computed at
+ * the edge from `startedAt` and is display-only (§5.3) — `elapsedSeconds()` in
+ * `components/time-entries/elapsed.ts` is the one place that arithmetic lives.
+ */
+export type TeamRunningTimer = {
+  id: string;
+  userId: string;
+  userName: string | null;
+  projectName: string | null;
+  taskName: string | null;
+  startedAt: string;
+};
+
+const RUNNING_TIMER_COLUMNS =
+  "id, user_id, started_at, projects (id, name), tasks (id, name), profiles!time_entries_user_id_company_id_fkey (id, full_name)";
+
 type EntryRow = {
   id: string;
   project_id: string;
@@ -470,6 +501,71 @@ export async function getRunningTimer(): Promise<
         endedAt: null,
         durationSeconds: null,
       },
+    };
+  } catch {
+    return { ok: false, error: NOT_CONFIGURED };
+  }
+}
+
+/**
+ * Every timer running in the company right now (§9.9, §5.4).
+ *
+ * **`getRunningTimer()` cannot answer this and must not be widened to.** That
+ * one filters `user_id` because it claims to be *mine* — it is what decides
+ * whether the dashboard shows a stop button — and a version of it that
+ * sometimes returned a colleague's row would break the card that consumes it.
+ * This is the other question, asked once, for `/overview`.
+ *
+ * **Not role-checked, deliberately**, following the reasoning
+ * `listPendingCorrectionRequests` sets out for the identical situation:
+ * `time_entries_select_own_or_admin` is the boundary, it is company-wide for an
+ * active admin and own-rows for everyone else, and a `role === "admin"` test
+ * here would be a third opinion free to disagree with it. An employee who
+ * reaches this gets their own running timer — the same row `getRunningTimer()`
+ * gives them, which is neither a leak nor a surprise. The page is admin-only in
+ * the UI (§4.2.2); the *team* is admin-only in the database.
+ *
+ * **No `company_id` filter either**, for the same reason and stated because its
+ * absence looks like an oversight: adding one would invite the reading that
+ * tenancy is enforced in TypeScript. It is enforced by
+ * `current_company_id()` inside the policy (§4.3).
+ *
+ * Ordered **oldest first**, which is the one ordering an exception queue can
+ * have: the longest-running timer is the likeliest to be stale (§5.4), so the
+ * row that needs attention is the row at the top. The read is cheap whatever
+ * the table's size — `time_entries_one_running_per_user` is a partial unique
+ * index over exactly the rows with `ended_at is null`, so the set being scanned
+ * is at most one row per person in the database, not one per entry.
+ */
+export async function listRunningTimers(): Promise<
+  ActionResult<TeamRunningTimer[]>
+> {
+  try {
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+      .from("time_entries")
+      .select(RUNNING_TIMER_COLUMNS)
+      .is("ended_at", null)
+      .order("started_at", { ascending: true });
+
+    if (error) {
+      return { ok: false, error: "Could not load the running timers." };
+    }
+
+    return {
+      ok: true,
+      data: data.map((row) => ({
+        id: row.id,
+        userId: row.user_id,
+        // Each embed is a join through RLS rather than a guaranteed row, so
+        // every one of these is `?? null` instead of a non-null assertion —
+        // see `TeamRunningTimer`.
+        userName: row.profiles?.full_name ?? null,
+        projectName: row.projects?.name ?? null,
+        taskName: row.tasks?.name ?? null,
+        startedAt: row.started_at,
+      })),
     };
   } catch {
     return { ok: false, error: NOT_CONFIGURED };

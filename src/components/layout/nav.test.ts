@@ -65,8 +65,28 @@ describe("navLinksFor", () => {
     expect(hrefs(null)).toEqual(hrefs("employee"));
   });
 
+  it("gives an admin the team overview and an employee nothing of it", () => {
+    // §9.9. The only flagged route whose data is genuinely admin-only —
+    // `time_entries` SELECT is company-wide for an active admin and own-rows
+    // for everybody else — so unlike the other three, the link and the boundary
+    // agree about something real.
+    expect(hrefs("admin")).toContain("/overview");
+    expect(hrefs("employee")).not.toContain("/overview");
+    expect(hrefs(null)).not.toContain("/overview");
+  });
+
+  it("keeps the overview out of the phone's four tab slots", () => {
+    // An admin already fills all four. A fifth primary link makes every tab too
+    // narrow to hit, so this one belongs behind "More".
+    const overview = navLinksFor("admin").find(
+      (link) => link.href === "/overview",
+    );
+
+    expect(overview?.primary).toBe(false);
+  });
+
   it("leaves an employee no overflow, which is why More holds sign out", () => {
-    // Both non-primary destinations are admin-only, so an employee's overflow
+    // All three non-primary destinations are admin-only, so an employee's overflow
     // menu is empty. `MobileTabBar` still renders "More", because the header's
     // sign-out is `md`-only and this is the phone's only way out.
     expect(navLinksFor("employee").filter((link) => !link.primary)).toEqual([]);

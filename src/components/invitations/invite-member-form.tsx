@@ -100,7 +100,18 @@ function InviteLink({ invitation }: { invitation: MintedInvitation }) {
  * stacking a second one — that happens in the action, so nothing here has to
  * ask whether one already exists.
  */
-export function InviteMemberForm() {
+export function InviteMemberForm({
+  onSent,
+}: {
+  /**
+   * Fired after an invitation is minted. **It is not a "close me" signal**, and
+   * the dialog that wraps this form must not treat it as one: the raw token is
+   * rendered exactly once by `InviteLink` below, and closing on success would
+   * destroy the only copy of the link. It exists so a container can re-render
+   * around the link — a heading, say — not so it can dismiss it.
+   */
+  onSent?: () => void;
+} = {}) {
   const router = useRouter();
   const [invitation, setInvitation] = useState<MintedInvitation | null>(null);
 
@@ -129,6 +140,7 @@ export function InviteMemberForm() {
       emailSent: result.data.emailSent,
     });
     form.reset({ email: "", role: values.role });
+    onSent?.();
     router.refresh();
   }
 

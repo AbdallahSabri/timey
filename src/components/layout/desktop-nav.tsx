@@ -9,7 +9,7 @@ import type { MemberRole } from "@/lib/validations/members";
 
 /**
  * The inline nav row, `md` and up. Hidden below that, where `MobileTabBar`
- * takes over — an admin's six links do not fit a phone's header at any font
+ * takes over — an admin's seven links do not fit a phone's header at any font
  * size worth reading.
  *
  * The list comes from `navLinksFor(role)`, never `NAV_LINKS` directly, so this

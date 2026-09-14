@@ -12,16 +12,15 @@
 
 /**
  * The stale threshold used when the company's own `max_timer_hours` is not
- * available to this layer.
+ * available to the caller.
  *
- * **This is a gap, not a setting.** `companies.max_timer_hours` (§3.1, §5.4)
- * exists in the database and defaults to 12, but `getCurrentMember()` returns
- * `{ id, name, timezone }` for the company and nothing else, and this layer may
- * not write the query that would widen it. A company that chose 8 or 24 at
- * onboarding is therefore judged against 12 here until the field is added to
- * `CurrentMember` — the number below is the database default, which makes it
- * right for every company that left the setting alone and wrong for any that
- * did not.
+ * **This used to be a gap and is now only a fallback.** `getCurrentMember()`
+ * has returned `maxTimerHours` since Phase 9, so every surface that judges
+ * staleness — the timer card, and §9.9's exception queue on `/overview` — passes
+ * the company's own setting (§3.1, §5.4). What is left for this constant is the
+ * case where the member has no company on record at all, which is §8.3's limbo
+ * state. The value is the database default, so it is right for every company
+ * that left the setting alone.
  */
 export const DEFAULT_MAX_TIMER_HOURS = 12;
 

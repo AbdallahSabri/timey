@@ -16,6 +16,7 @@
 
 import { safeTimeZone } from "@/components/time-entries/format-entry";
 import { companyLocalDate } from "@/lib/time/company-time";
+import { isWorkingDay, type Weekday } from "@/lib/time/working-days";
 
 /** Pinned for the same reason `format-entry.ts` pins it: server and browser must agree. */
 const LOCALE = "en-GB";
@@ -92,6 +93,57 @@ export function addDays(day: string, delta: number): string {
 /** The first day of `day`'s month. */
 export function startOfMonth(day: string): string {
   return isDayString(day) ? `${day.slice(0, 7)}-01` : day;
+}
+
+/**
+ * The first day of the week `day` falls in, counting weeks from
+ * `companies.week_starts_on` (§3.1 — 0 = Sunday, 1 = Monday).
+ *
+ * Arithmetic on the *label*, in UTC, exactly like `addDays` and `startOfMonth`
+ * above and for the same reason: "this week" means a set of company-local days,
+ * and asking the browser which weekday a label falls on would move the boundary
+ * for anyone whose machine is set to a different zone. The instant-shaped
+ * question — which company-local day *is* it — is `companyToday`'s, and this
+ * takes that answer as its input.
+ *
+ * `weekStartsOn` outside 0–6 falls back to Monday, matching `weekdaysFrom`'s
+ * own guard rather than inventing a second reading of a bad setting.
+ */
+export function startOfWeek(day: string, weekStartsOn: number): string {
+  const dow = dayOfWeek(day);
+  if (dow === null) {
+    return day;
+  }
+
+  const start = isWorkingDay(weekStartsOn) ? weekStartsOn : 1;
+  // `+ 7` before the modulo because JavaScript's `%` keeps the sign of the
+  // left operand: a Sunday (0) in a Monday-start week is six days in, not
+  // minus one.
+  return addDays(day, -((dow - start + 7) % 7));
+}
+
+/**
+ * Which day of the week a `YYYY-MM-DD` label names, in **Postgres
+ * `extract(dow)` numbering** (0 = Sunday) — so the result feeds
+ * `weekdayShortName` and compares against a `working_days` array with no
+ * offset arithmetic anywhere. `working-days.ts` explains why that numbering
+ * was chosen; off-by-one weekday arithmetic is the kind of bug that is wrong
+ * for a year before anyone notices.
+ *
+ * Read in UTC, because the label is a label: `getUTCDay()` of the midnight that
+ * stands in for it is the weekday printed on a company calendar, while
+ * `getDay()` would be the weekday in whatever zone the reader is sitting in.
+ *
+ * Null for a string that names no real day, like every other function here.
+ */
+export function dayOfWeek(day: string): Weekday | null {
+  const ms = dayToUtcMs(day);
+  if (ms === null) {
+    return null;
+  }
+
+  const dow = new Date(ms).getUTCDay();
+  return isWorkingDay(dow) ? dow : null;
 }
 
 /** The last day of `day`'s month, found by stepping back from the first of the next. */

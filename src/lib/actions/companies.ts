@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 // Type-only, so it is erased at build time and does not pull another
 // "use server" module into this one's graph.
 import type { ActionResult } from "@/lib/actions/auth";
+import {
+  readCurrentMember,
+  type CurrentMember,
+} from "@/lib/auth/current-member";
 import { createClient } from "@/lib/supabase/server";
 import {
   createCompanySchema,
@@ -23,46 +27,13 @@ const NOT_CONFIGURED =
   "Authentication is not configured. Check the Supabase environment variables.";
 
 /**
- * Who is signed in, what they may do, and where. One read, because the
- * dashboard, the members page, and every admin-gated view ask the same
- * question and a copy of this query in each of them drifts (`BLOCKERS.md`
- * N-4).
- *
- * `company` is null for a limbo user (§8.3) — the state between signup and
- * company creation or invitation acceptance, and the only valid null on
- * `profiles.company_id`.
+ * `CurrentMember` and the query behind it now live in
+ * `lib/auth/current-member.ts`, memoised per request with React's `cache`
+ * — see that file for why it cannot live in a `"use server"` module. Re-exported
+ * here because this is the name the whole app imports, and moving the type
+ * would have been a rename dressed up as a refactor.
  */
-export type CurrentMember = {
-  id: string;
-  /**
-   * The auth account's address, not a profiles column — `profiles` has none.
-   * Carried because `/invite/[token]` has to compare it against the invited
-   * address (§8.4.1): without it the page offers an Accept button to someone
-   * `accept_invitation()` is certain to refuse with 42501.
-   *
-   * Nullable because `auth.users.email` is, for an account created through a
-   * provider that supplies no address.
-   */
-  email: string | null;
-  fullName: string;
-  role: MemberRole;
-  status: MemberStatus;
-  company: {
-    id: string;
-    name: string;
-    timezone: string;
-    maxTimerHours: number;
-    /**
-     * 0 = Sunday, 1 = Monday (§3.1). Stored since Phase 1 and, until §9.8's
-     * schedule picker, read by nothing — the column was carried on the promise
-     * that something would eventually order a week by it, and this is that
-     * something. It orders *display* only: `working_days` is stored in
-     * `extract(dow)` numbering regardless, so rotating a picker can never
-     * change what a schedule means.
-     */
-    weekStartsOn: number;
-  } | null;
-};
+export type { CurrentMember } from "@/lib/auth/current-member";
 
 /** One row of the admin members list. */
 export type CompanyMember = {
@@ -201,16 +172,6 @@ export async function createCompany(
   return { ok: true, data: { companyId } };
 }
 
-/**
- * `null` data means "nobody is signed in" — not an error, so a Server
- * Component can call this defensively without a try/catch of its own.
- * Middleware (§8.3) already guarantees a session on authenticated routes;
- * this is the belt to that pair of braces, not a second gate.
- *
- * RLS scopes the read to the caller's own row regardless of what is asked
- * for, and `profiles_select_own_company` covers the limbo case by PK
- * (§4.2.1).
- */
 /** One row of `pending_invitation_for_me()`. Never carries a token — see 0012. */
 export type PendingInvitation = {
   companyName: string;
@@ -218,60 +179,27 @@ export type PendingInvitation = {
   expiresAt: string;
 };
 
+/**
+ * The `"use server"` door onto `readCurrentMember` in `lib/auth/current-member.ts`
+ * — which is where the query, the per-request memo and the reasoning all live now.
+ *
+ * It stays an exported action rather than becoming an import at every call site
+ * because two dozen Server Components already call it by this name, and because
+ * `BLOCKERS.md` N-4 closed on "one path for current member + company + role".
+ * Two names for one read would reopen exactly that.
+ *
+ * `null` data means "nobody is signed in" — not an error, so a Server Component
+ * can call this defensively without a try/catch of its own. Middleware (§8.3)
+ * already guarantees a session on authenticated routes; this is the belt to
+ * that pair of braces, not a second gate.
+ *
+ * RLS scopes the read to the caller's own row regardless of what is asked for,
+ * and `profiles_select_own_company` covers the limbo case by PK (§4.2.1).
+ */
 export async function getCurrentMember(): Promise<
   ActionResult<CurrentMember | null>
 > {
-  try {
-    const supabase = await createClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return { ok: true, data: null };
-    }
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select(
-        "id, full_name, role, status, companies (id, name, timezone, max_timer_hours, week_starts_on)",
-      )
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (error) {
-      return { ok: false, error: "Could not load your account." };
-    }
-    if (!data) {
-      // Authenticated with no profile row: a signup whose trigger has not
-      // landed yet. Reported as absent rather than fabricated, so the caller
-      // shows the same "not ready" state it would for a signed-out visitor.
-      return { ok: true, data: null };
-    }
-
-    return {
-      ok: true,
-      data: {
-        id: data.id,
-        email: user.email ?? null,
-        fullName: data.full_name,
-        role: data.role,
-        status: data.status,
-        company: data.companies
-          ? {
-              id: data.companies.id,
-              name: data.companies.name,
-              timezone: data.companies.timezone,
-              maxTimerHours: data.companies.max_timer_hours,
-              weekStartsOn: data.companies.week_starts_on,
-            }
-          : null,
-      },
-    };
-  } catch {
-    return { ok: false, error: NOT_CONFIGURED };
-  }
+  return readCurrentMember();
 }
 
 function memberUpdateErrorMessage(
