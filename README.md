@@ -111,13 +111,15 @@ gate red. That is the only reason the script exists.
    into "Confirm signup", and `supabase/templates/recovery.html` into "Reset Password". `supabase/config.toml` is
    local-only and none of it reaches a hosted project.
 
-   This is not cosmetic. Both hosted defaults use `{{ .ConfirmationURL }}`, which lands the session as a **URL
-   fragment** that no server can read; the repo's templates instead point at `/auth/confirm` and `/auth/reset`,
-   which exchange the token server-side so the session arrives as a cookie. Skip this and signup confirmation and
-   password reset both break in production only (`BLOCKERS.md` D-8, D-18). Check **Authentication → URL
-   Configuration**'s Site URL points at the app's origin while you are there — every emailed link is built from it —
-   and that "Secure password change" is off, or `updateUser({ password })` demands a nonce the reset flow never
-   collects.
+   This is not cosmetic. Both hosted defaults use `{{ .ConfirmationURL }}`, which routes through GoTrue's own
+   `/auth/v1/verify`: GoTrue consumes the token itself and redirects to the Site URL carrying the result in a form
+   no server here can read — a **URL fragment** under the implicit flow, or a bare **`?code=`** under PKCE, which
+   is what `@supabase/ssr` uses and therefore the one you will actually see. The repo's templates instead point at
+   `/auth/confirm` and `/auth/reset`, which exchange the token server-side so the session arrives as a cookie. Skip
+   this and signup confirmation and password reset both break in production only — the reset link lands on the
+   marketing homepage (`BLOCKERS.md` D-8, D-18, D-21). Check **Authentication → URL Configuration**'s Site URL
+   points at the app's origin while you are there — every emailed link is built from it — and that "Secure password
+   change" is off, or `updateUser({ password })` demands a nonce the reset flow never collects.
 
 Use `pnpm exec` rather than a global `supabase`: the CLI is a devDependency, so this runs the version the repo
 was built against instead of whatever happens to be on your PATH.

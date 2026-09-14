@@ -8,6 +8,57 @@ Each open blocker names the phase it stops and the **default it will proceed on*
 
 ## Resolved — decisions answered
 
+### D-21 · Coolify is the host, and the dashboard-only Auth config that broke password reset, 2026-09-14
+
+**Two facts about production that the repo had never recorded, one of which was an outage.**
+
+**The host is Coolify, not Netlify.** `_plans/production-supabase-netlify.md` planned a Netlify
+site; it was never adopted — no `netlify.toml` was ever committed and no file outside that plan
+mentioned Netlify. What actually ships is the multi-stage `Dockerfile` that predates the plan,
+built by a self-managed Coolify server on `https://timely.abdallahsabri.com`, triggered by the
+`deploy` job in `.github/workflows/ci.yml` after the full gate passes. The plan has been renamed
+to `_plans/production-supabase-coolify.md` and its Netlify parts rewritten to describe that.
+
+HTTPS on that domain is load-bearing rather than hygiene. The recovery marker is set `Secure`
+outside development (`src/lib/auth/recovery.ts:68`), while `@supabase/ssr` sets no `Secure` flag
+on GoTrue's session cookies at all — so on the earlier plain-HTTP `…sslip.io` deployment the
+browser kept the session and dropped the marker, landing the user signed in on `/dashboard` with
+the password they came to change still in place. That is D-18's silent no-op reset reached from
+the other side, and TLS is what retired it.
+
+**Password reset was broken in production the whole time, and nothing in the repo could have
+caught it.** A reset link arrived as `https://timely.abdallahsabri.com/?code=<uuid>`. The hosted
+project was still on Supabase's **default** Reset Password template, whose `{{ .ConfirmationURL }}`
+routes through GoTrue's own `/auth/v1/verify` — GoTrue consumes the token itself, then redirects
+to the Site URL carrying the result as `?code=` under PKCE (what `@supabase/ssr` uses) or as a URL
+fragment under the implicit flow. Nothing in this app reads either, so `/auth/reset` was never
+reached and the user got the marketing homepage. **The app side was never at fault**: the route,
+the marker cookie, the gate and the form were all correct and were walked end to end locally.
+
+The cause is structural, not a typo. `supabase/config.toml` registers
+`supabase/templates/recovery.html`, but that file is **local-only and reaches nothing hosted** —
+so the repo asserts a template the production project never had, with no check that would notice.
+D-8 landed the same paste for `confirmation.html` and the deployment checklist grew a step for it;
+recovery shipped in D-18 and the matching step was never added, so it was never done.
+
+**Fixed by configuration, deliberately, and not by code.** An app-side fallback that exchanged a
+stray `?code=` was considered and rejected: it would have had to guess whether a given code was a
+recovery or a signup confirmation (the hosted project has `mailer_autoconfirm: false`, so both are
+live), and getting that wrong drops a new user on "Choose a new password" — the exact `/auth/confirm`
+vs `/auth/reset` conflation D-18 closed. The emailed URL still gets no vote on the OTP type or the
+landing page.
+
+What changed instead: the Reset Password template pasted into the dashboard; Site URL confirmed as
+`https://timely.abdallahsabri.com`; "Secure password change" confirmed off, or `updateUser({ password })`
+demands a nonce `src/lib/actions/auth.ts` never collects and the flow fails at *submit* instead.
+`README.md` §"Pointing at a hosted project" now names `?code=` alongside the fragment case, since
+that is the symptom someone debugging this will actually search for.
+
+**Left open.** Part 2 of the plan has no representation in the repo and no test. `supabase config
+push` would give it one, but it pushes the whole `[auth]` block — including
+`enable_confirmations = false`, which would turn signup confirmation **off** in production — so
+`config.toml` needs reconciling with production intent before that is safe to run.
+
 ### D-20 · Employee cards, the first percentage, and the invite-to-project gap left open, 2026-09-13
 
 **`SPEC.md` §9.9.6 (new), §9.9.7 (new), §9.9, §9.9.1, §9.9.3, §12.2; `PLAN.md` Phase 11.** Phase 10 put the team's data on `/overview`; this makes it readable as *employee* data and gives a new admin the order a company has to be built in.
