@@ -54,6 +54,17 @@ demands a nonce `src/lib/actions/auth.ts` never collects and the flow fails at *
 `README.md` §"Pointing at a hosted project" now names `?code=` alongside the fragment case, since
 that is the symptom someone debugging this will actually search for.
 
+**One guard rail added, and only one.** The cause is config, so the fix is config — but the
+*silence* was the app's, and that part is closed. `src/app/page.tsx` read no query string, so a
+reset that had done nothing arrived at a homepage that looked entirely normal; the only evidence
+was a parameter no page looked at. `/` now treats `code` or `error_description` as the residue of
+an auth link finished nowhere and redirects to `/forgot-password?error=auth_link_unusable` — a
+distinct code from `reset_link_invalid`, because nothing expired or was used here. It reports and
+does not exchange, for the reason above: the redirect does not say whether a code is a recovery or
+a signup confirmation, and guessing wrong rebuilds the conflation at the front door. `SPEC.md` §8.5
+carries the ruling; `src/app/page.test.tsx` is the regression net, and is the first test in this
+repo against a page rather than a route handler.
+
 **Left open.** Part 2 of the plan has no representation in the repo and no test. `supabase config
 push` would give it one, but it pushes the whole `[auth]` block — including
 `enable_confirmations = false`, which would turn signup confirmation **off** in production — so

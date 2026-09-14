@@ -31,6 +31,19 @@ export const metadata: Metadata = {
 const SEARCH_PARAM_ERRORS: Record<string, string> = {
   reset_link_invalid:
     "That reset link is invalid, has expired, or has already been used. Request another one below.",
+
+  /**
+   * From `/` (`app/page.tsx`), when an auth link landed on the Site URL instead
+   * of on `/auth/reset` — a hosted project still on GoTrue's default email
+   * template. Kept distinct from `reset_link_invalid` rather than folded into
+   * it: that copy asserts the link expired or was used, and neither is true of
+   * a link that was built wrong. The remedy on offer is the same, so this still
+   * lands above a working request form — but if the template is the problem,
+   * the next link is mis-built too, and the error code in the URL is what tells
+   * an operator to go read `BLOCKERS.md` D-21 rather than keep clicking.
+   */
+  auth_link_unusable:
+    "That link couldn't be completed. Request a new one below.",
 };
 
 export default async function ForgotPasswordPage({
